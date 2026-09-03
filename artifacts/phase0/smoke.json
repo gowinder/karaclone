@@ -1,0 +1,18 @@
+{
+  "deploymentId": "28d1e022-d7f6-4e3a-b477-0db20cc06d7d",
+  "versionIds": [
+    "50d98bfb-70a1-4ef2-95ea-d939b01acf01"
+  ],
+  "profile": "probes",
+  "workerUrl": "https://karaclone-phase0.gowinder.workers.dev",
+  "sourceDeploySha256": "c09181f3d87c02bb4d4696cebb5b7f7fe39906badadc2fd8350a01de9099c67a",
+  "healthOk": true,
+  "versionOk": true,
+  "whoamiOk": true,
+  "noKeyRejected": true,
+  "badKeyRejected": true,
+  "versionValue": "0.1.0",
+  "checkedAt": "2026-09-03T04:31:11.656Z",
+  "canonicalSha256": "32920cd7e6690bdcaff1e145ee291c906413fb631e37b3b6cadb024e4a6409a7",
+  "passed": true
+}
