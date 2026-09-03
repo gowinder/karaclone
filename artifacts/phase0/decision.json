@@ -1,0 +1,111 @@
+{
+  "decision": "NO-GO",
+  "failedGates": [
+    "G2",
+    "G3",
+    "G4",
+    "G5",
+    "G7"
+  ],
+  "gates": {
+    "G0": true,
+    "G1": true,
+    "G2": false,
+    "G3": false,
+    "G4": false,
+    "G5": false,
+    "G6": true,
+    "G7": false
+  },
+  "checkedAt": "2026-09-03T17:44:51.332Z",
+  "lockedVersions": {
+    "karakeepCommit": "5a2f009e2f6d266087f2f3f527e6e384cefd6de4",
+    "extension": "1.2.11",
+    "mobile": "1.11.0"
+  },
+  "exemptions": [
+    {
+      "gate": "G0",
+      "note": "Gowinder 账户 3 个 Paid 订阅与项目无关，preflight passed=false 允许继续"
+    },
+    {
+      "gate": "G2",
+      "note": "Queue retention 实际 345600 秒（4 天）非 Free 24 小时，用户批准忽略，按 24 小时假设继续"
+    },
+    {
+      "gate": "G0",
+      "note": "entitlement 三件套跳过（collector 代码保留在仓库但不再运行）"
+    }
+  ],
+  "evidence": {
+    "g0Exemption": {
+      "preflightPassed": false,
+      "subscriptionRiskFree": false,
+      "exemption": "Gowinder 账户 3 个 Paid 订阅与项目无关，用户批准忽略"
+    },
+    "g0AccountIdSha256": "bef40fdf3e1c552e900d60686f364aa0f847a5ce4e2066a44e094b2ef14eb645",
+    "clientLockSha256": "8ecfe78afa121e4c455fdf43ec70a7806f3847978331e92c606b1ca1e224c1ec",
+    "firstCommit": "b0d7dab580598516075bb9730c5c472ab673b811",
+    "blobs": {
+      "config/phase0/client-lock.json": "9f48530f1d819b8da6832b76ba048ed55f3cc3d0",
+      "artifacts/phase0/extension-client-manifest.json": "3906552d64133063d821c78f852500d02088cc69",
+      "artifacts/phase0/android-client-manifest.json": "7048f6c5d76433584070c49c5ab3a4ba873a01c0",
+      "artifacts/phase0/extension-store-evidence.json": "599233df88cb2551166da1a7a2b4c57725e973af"
+    },
+    "treeSha": "91a52f393ff9470ee7e626f0742c719a9d0a75fb",
+    "sourceBlobs": {
+      "scripts/phase0/capture-workers-plan-entitlement.mjs": "f30bba03b912ae70031f4bdb9113428b5c20bc3a",
+      "test/workers-plan-entitlement.test.ts": "1fa67bfef2b594c41b9341795e7afc1cf258f134"
+    },
+    "queueRetentionExemption": {
+      "actualRetentionSeconds": 345600,
+      "exemption": "Queue retention 实际 345600 秒（4 天）非 Free 24 小时，用户批准忽略"
+    },
+    "probesProvenance": {
+      "deploymentId": "395b2fbf-01a1-4757-95a9-2191e38b8bb9",
+      "versionIds": [
+        "e08dc55c-4e82-42e7-ba19-c29e1e2800c7"
+      ],
+      "profile": "probes",
+      "workerUrl": "https://karaclone-phase0.gowinder.workers.dev",
+      "sourceDeploySha256": "712abc1b38e6cd2044868c9b60bd2df5f6a8a22c307a90cfb6e244c3dd24a7cd"
+    },
+    "cpuProvenance": {
+      "deploymentId": "c3f99606-9914-4ff8-ae92-2309cd670ddd",
+      "versionIds": [
+        "83ceedd4-4f63-4213-8d3c-f790e6beac8b"
+      ],
+      "profile": "cpu",
+      "workerUrl": "https://karaclone-phase0.gowinder.workers.dev",
+      "sourceDeploySha256": "42c64648ee8fe67a349f05fcff8967e7d06772195645ebfc9af864c6ae502239"
+    }
+  },
+  "failures": [
+    "G2: bootstrap.json.sourceDeploySha256 mismatch",
+    "G2: smoke.json.deploymentId mismatch",
+    "G2: smoke.json.versionIds mismatch",
+    "G2: smoke.json.sourceDeploySha256 mismatch",
+    "G3: deploy-clients.json missing",
+    "G3: extension-store-content-binding.json missing",
+    "G3: extension-screenshots.json missing",
+    "G3: extension-manual.json missing",
+    "G3: capture-freeze-extension.json missing",
+    "G3: wire-extension.json missing",
+    "G3: final-store-binding.json missing",
+    "G3: final-store-screenshot-manifest.json missing",
+    "G3: final-installed-content-manifest.json missing",
+    "G3: final-signed-content-manifest.json missing",
+    "G3: final-store-install.png missing",
+    "G4: mobile-version-evidence.json missing",
+    "G4: mobile-manual.json missing",
+    "G4: mobile-screenshots.json missing",
+    "G4: capture-freeze-mobile.json missing",
+    "G4: wire-mobile.json missing",
+    "G5: cpu passed:false",
+    "G5: cpu p99 >= 8000us",
+    "G5: free-limit.json missing",
+    "G5: deploy-cleanup.json missing",
+    "G7: queue-invocations.json passed:false"
+  ],
+  "canonicalSha256": "0ee13da437672f9a7cbcf69ed83197262f6d7679f30d893675f06c35b74d46a2"
+}

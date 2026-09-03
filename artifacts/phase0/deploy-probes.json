@@ -2,13 +2,13 @@
   "profile": "probes",
   "captureEnabled": true,
   "workerUrl": "https://karaclone-phase0.gowinder.workers.dev",
-  "deploymentId": "28d1e022-d7f6-4e3a-b477-0db20cc06d7d",
+  "deploymentId": "395b2fbf-01a1-4757-95a9-2191e38b8bb9",
   "versionIds": [
-    "50d98bfb-70a1-4ef2-95ea-d939b01acf01"
+    "e08dc55c-4e82-42e7-ba19-c29e1e2800c7"
   ],
-  "sourceDeploySha256": "c09181f3d87c02bb4d4696cebb5b7f7fe39906badadc2fd8350a01de9099c67a",
+  "sourceDeploySha256": "712abc1b38e6cd2044868c9b60bd2df5f6a8a22c307a90cfb6e244c3dd24a7cd",
   "accountIdSha256": "bef40fdf3e1c552e900d60686f364aa0f847a5ce4e2066a44e094b2ef14eb645",
-  "gitCommit": "bd44d0c119b4282905a11c6265eeb3c0cb0ba903",
+  "gitCommit": "b8b2acd2689e9ed92d68f184c2983b599076331a",
   "wranglerConfigSha256": "0ba9619e16910429956b63148e8dfbcbecb979541023913c22b2f10482e4208f",
   "sourceManifest": [
     {
@@ -33,8 +33,8 @@
     },
     {
       "path": "src/ai/cloudflare-ai.ts",
-      "bytes": 1209,
-      "sha256": "9d2a62c9d61fd0811a5d97c25eb2686f407e29ee2fcf8a0cdf339c671b257d87"
+      "bytes": 2033,
+      "sha256": "02ce5e9ff21bcabb5ca8b91a299c67875732b3bc06b4d57afb8b8bdfbeffceaf"
     },
     {
       "path": "src/ai/tag-schema.ts",
@@ -133,8 +133,8 @@
     },
     {
       "path": "src/phase0/queue-probe.ts",
-      "bytes": 3090,
-      "sha256": "98ee9eb0b7bd9a631fccaecfa3c6490d272738f983e87f2555c2172ad92660ad"
+      "bytes": 3187,
+      "sha256": "6ea90287593091d117589ef59802071764bacd4243b54839f0142e41deb4ce45"
     },
     {
       "path": "src/queue/consumer.ts",
@@ -228,8 +228,8 @@
     },
     {
       "path": "vitest.config.ts",
-      "bytes": 1311,
-      "sha256": "33f728c0c87b88d581f1c1ff1965ebb78bb77b564a9250a77adc298ee4f1a0ba"
+      "bytes": 1408,
+      "sha256": "049539ccc8606b32ccdaf5cb29baa370f9110bda6d6c1757b0aff24a957eea15"
     },
     {
       "path": "worker-configuration.d.ts",
@@ -242,7 +242,7 @@
       "sha256": "c5ec33355c4f7d7fa19ae1ddfe44a78d27609dbbb24c456abaf002bf3943b7ca"
     }
   ],
-  "sourceManifestSha256": "c09181f3d87c02bb4d4696cebb5b7f7fe39906badadc2fd8350a01de9099c67a",
+  "sourceManifestSha256": "712abc1b38e6cd2044868c9b60bd2df5f6a8a22c307a90cfb6e244c3dd24a7cd",
   "d1DatabaseName": "karaclone-phase0",
   "queueNames": [
     "karaclone-phase0-enrichment",
@@ -254,25 +254,25 @@
   "healthOk": true,
   "versionOk": true,
   "versionValue": "0.1.0",
-  "checkedAt": "2026-09-03T04:30:34.253Z",
-  "canonicalSha256": "9dfd298f21d0876dccc26e9a9f51c8ef874fd33350d07d5b482494530fbab06b",
+  "checkedAt": "2026-09-03T07:30:47.121Z",
+  "canonicalSha256": "09af550340255864b0be4cea7dc2937493f421157bc3fbce454f15121cfd0dfa",
   "passed": true,
   "queueProjections": {
     "karaclone-phase0-enrichment": {
       "queueName": "karaclone-phase0-enrichment",
       "retentionSeconds": 345600,
       "retentionHours": 24,
-      "queriedAt": "2026-09-03T04:31:00.260Z",
+      "queriedAt": "2026-09-03T07:31:31.404Z",
       "source": "api.cloudflare.com/client/v4/accounts/{account}/queues/{queue_id}",
-      "projectionSha256": "fbb058835fa7dc8cef67df396a34c1507baf9e2bac83ec2edb6cec4e4e8d211c"
+      "projectionSha256": "b50dd3936258faad48eb444480da14cc6333ef3551f1e7f1a5042c0c5a1cdc2f"
     },
     "karaclone-phase0-enrichment-dlq": {
       "queueName": "karaclone-phase0-enrichment-dlq",
       "retentionSeconds": 345600,
       "retentionHours": 24,
-      "queriedAt": "2026-09-03T04:31:00.624Z",
+      "queriedAt": "2026-09-03T07:31:31.709Z",
       "source": "api.cloudflare.com/client/v4/accounts/{account}/queues/{queue_id}",
-      "projectionSha256": "563492fe004e3ba04690b47ed55c11f5423a7aeee82c34902a1c2af1b6a763be"
+      "projectionSha256": "a04396ba8be8157cd5227519caedaa937dcbda201a77aa752ea312e627d57452"
     }
   },
   "creationCommandProjection": {

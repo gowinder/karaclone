@@ -1,0 +1,35 @@
+{
+  "commands": [
+    {
+      "command": "npm test",
+      "exitCode": 0,
+      "combined": "\n> test\n> vitest run --max-workers=1 --no-isolate\n\n\n RUN  v4.1.11 /Users/gowinder/code/gowinder/karaclone\n\n⎔ Establishing remote connection...\nUsing secrets defined in .dev.vars\n\n Test Files  21 passed (21)\n      Tests  272 passed (272)\n   Start at  01:44:15\n   Duration  19.66s (transform 446ms, setup 540ms, import 352ms, tests 11.47s, environment 0ms)\n\n\n\u001b[33m▲ \u001b[43;33m[\u001b[43;30mWARNING\u001b[43;33m]\u001b[0m \u001b[1mAI bindings always access remote resources, and so may incur usage charges even in local dev. To suppress this warning, set `remote: true` for the binding definition in your configuration file.\u001b[0m\n\n\nSourcemap for \"/Users/gowinder/code/gowinder/karaclone/node_modules/superjson/dist/index.js\" points to missing source files\nSourcemap for \"/Users/gowinder/code/gowinder/karaclone/node_modules/superjson/dist/class-registry.js\" points to missing source files\nSourcemap for \"/Users/gowinder/code/gowinder/karaclone/node_modules/superjson/dist/registry.js\" points to missing source files\nSourcemap for \"/Users/gowinder/code/gowinder/karaclone/node_modules/superjson/dist/double-indexed-kv.js\" points to missing source files\nSourcemap for \"/Users/gowinder/code/gowinder/karaclone/node_modules/superjson/dist/custom-transformer-registry.js\" points to missing source files\nSourcemap for \"/Users/gowinder/code/gowinder/karaclone/node_modules/superjson/dist/util.js\" points to missing source files\nSourcemap for \"/Users/gowinder/code/gowinder/karaclone/node_modules/superjson/dist/plainer.js\" points to missing source files\nSourcemap for \"/Users/gowinder/code/gowinder/karaclone/node_modules/superjson/dist/is.js\" points to missing source files\nSourcemap for \"/Users/gowinder/code/gowinder/karaclone/node_modules/superjson/dist/pathstringifier.js\" points to missing source files\nSourcemap for \"/Users/gowinder/code/gowinder/karaclone/node_modules/superjson/dist/transformer.js\" points to missing source files\nSourcemap for \"/Users/gowinder/code/gowinder/karaclone/node_modules/superjson/dist/accessDeep.js\" points to missing source files\n"
+    },
+    {
+      "command": "npm run typecheck",
+      "exitCode": 0,
+      "combined": "\n> typecheck\n> tsc --noEmit\n\n\n"
+    },
+    {
+      "command": "npx wrangler deploy --dry-run",
+      "exitCode": 0,
+      "combined": "\n ⛅️ wrangler 4.128.0\n────────────────────\nTotal Upload: 688.70 KiB / gzip: 115.36 KiB\nYour Worker has access to the following bindings:\nBinding                                                                        Resource                  \nenv.ENRICHMENT_QUEUE (karaclone-phase0-enrichment)                             Queue                     \nenv.DB (karaclone-phase0)                                                      D1 Database               \nenv.AI                                                                         AI                        \nenv.SERVER_VERSION (\"0.1.0\")                                                   Environment Variable      \nenv.AI_MODEL (\"@cf/meta/llama-3.1-8b-instruct-fast\")                           Environment Variable      \nenv.PHASE0_CAPTURE (\"true\")                                                    Environment Variable      \nenv.ALLOWED_EXTENSION_ORIGIN (\"chrome-extension://kgcjekpmcjjogibpje...\")      Environment Variable      \n\n--dry-run: exiting now.\n\n"
+    }
+  ],
+  "dryRun": {
+    "bindings": [
+      "Queue",
+      "D1 Database",
+      "AI"
+    ],
+    "forbiddenResources": [],
+    "cronOk": true,
+    "cpuMsPresent": false,
+    "bindingsOk": true,
+    "forbiddenOk": true,
+    "cpuMsOk": true
+  },
+  "passed": true,
+  "checkedAt": "2026-09-03T17:44:39.431Z",
+  "canonicalSha256": "08ae1b264e23c961ecaeed67dd787d14644814638045dff2a6b20148db44ef9a"
+}

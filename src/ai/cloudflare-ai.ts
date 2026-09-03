@@ -31,7 +31,20 @@ export async function runLockedTextModel(
   }
   const binding = ai as AiBinding;
   const raw = await binding.run(LOCKED_MODEL, input);
-  // 显式 unknown 双重转换：先到 unknown，再按最小结构读取
+  // 显式 unknown 双重转换：先到 unknown，再按最小结构读取。
+  // Workers AI 文本模型返回 { response: string }，JSON Mode 下 response 是 JSON 文本。
   const asUnknown: unknown = raw;
+  if (asUnknown !== null && typeof asUnknown === "object") {
+    const record = asUnknown as Record<string, unknown>;
+    // Workers AI 文本模型返回 OpenAI 兼容 { choices:[{message:{content}}], response }；
+    // JSON Mode 下 response 是已解析对象，content 是 JSON 文本。
+    if (record.response !== undefined) return record.response;
+    if (typeof record.response === "string") return record.response;
+    const choices = record.choices;
+    if (Array.isArray(choices) && choices.length > 0) {
+      const content = (choices[0] as Record<string, unknown>)?.message as Record<string, unknown> | undefined;
+      if (content && typeof content.content === "string") return content.content;
+    }
+  }
   return asUnknown;
 }

@@ -17,7 +17,8 @@ export async function handleQueueProbe(req: Request, env: Env): Promise<Response
     const jobId = crypto.randomUUID();
     const bookmarkId = crypto.randomUUID();
     const now = Date.now();
-    const urlSnapshot = "https://example.com/phase0-queue-probe";
+    // 唯一 URL：避免 UNIQUE(user_id, canonical_url) 冲突导致重复运行 1101
+    const urlSnapshot = `https://example.com/phase0-queue-probe-${jobId}`;
     await env.DB.batch([
       env.DB
         .prepare(

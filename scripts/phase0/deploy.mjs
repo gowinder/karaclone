@@ -1,22 +1,25 @@
 /**
- * Phase 0 确定性部署脚本（T11 Step 2）。
+ * Phase 0 确定性部署脚本（T11 Step 2 / T12 Step 5/7）。
  *
- * 顺序固定：d1 migrations apply --remote → deploy --strict --message phase0-go-no-go
- * → GET /api/health → GET /api/version → deployments status --json（只接受 production）。
+ * probes：d1 migrations apply --remote → deploy --strict → health/version → deployments status。
+ * cpu：CSPRNG 生成 secret/path/session nonce，stdin 注入 versions secret put，
+ *      --var PHASE0_CAPTURE=false --var PHASE0_CPU_LIMIT_PROBE=true 覆盖部署，
+ *      明文只写 .phase0/runtime/cpu-limit-handoff（0700/0600 独占创建）。
+ * cleanup：--var PHASE0_CAPTURE=false --var PHASE0_CPU_LIMIT_PROBE=false，
+ *      versions secret delete 两个 binding，覆盖部署，复查 404/health/version。
  *
  * 输出 deploy-<profile>.json：profile、captureEnabled、Worker URL、production deploymentId、
  * 稳定排序 versionIds、accountIdSha256、git commit、Wrangler 配置 canonical SHA-256、
  * source/bundle manifest canonical SHA-256、D1/Queue 名称、migration/deploy/status/health/version
- * 布尔、时间、canonicalSha256、passed。不含明文 Account ID/token/key。
- *
- * probes profile 额外保存主 Queue 与 DLQ 的官方控制面脱敏投影（retention 如实记录，
- * 用户豁免 345600 秒 ≠ 24 小时）与创建请求未携带 retention 参数的可重算命令投影。
+ * 布尔、时间、canonicalSha256、passed。不含明文 Account ID/token/key/secret。
  *
  * 用法：node scripts/phase0/deploy.mjs --profile probes --out artifacts/phase0/deploy-probes.json
+ *       node scripts/phase0/deploy.mjs --profile cpu --out artifacts/phase0/deploy-cpu.json
+ *       node scripts/phase0/deploy.mjs --profile cleanup --from artifacts/phase0/deploy-cpu.json --out artifacts/phase0/deploy-cleanup.json
  */
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { chmodSync, mkdirSync, openSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonicalJsonHash } from "./canonical-json.mjs";
@@ -26,6 +29,10 @@ const REPO_ROOT = join(__dirname, "..", "..");
 const PROFILES = ["probes", "cpu", "clients", "cleanup"];
 const WRANGLER = "wrangler@4.128.0";
 const QUEUE_NAMES = ["karaclone-phase0-enrichment", "karaclone-phase0-enrichment-dlq"];
+const CPU_SECRET_BINDING = "PHASE0_CPU_LIMIT_SECRET";
+const CPU_PATH_BINDING = "PHASE0_CPU_LIMIT_PATH_SEGMENT";
+const HANDOFF_DIR = join(REPO_ROOT, ".phase0", "runtime");
+const HANDOFF_PATH = join(HANDOFF_DIR, "cpu-limit-handoff");
 
 function sha256Hex(value) {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -127,6 +134,16 @@ function runWrangler(spawn, args) {
   return res.stdout;
 }
 
+/** stdin 注入式 wrangler 调用（secret put 用，值不进入 argv）。 */
+function runWranglerInput(spawn, args, input) {
+  const res = spawn("npx", [WRANGLER, ...args], { input });
+  if (res.error) throw res.error;
+  if (res.status !== 0) {
+    throw new Error(`WRANGLER_FAILED: ${args.join(" ")} exit ${res.status}: ${(res.stderr || res.stdout).slice(0, 800)}`);
+  }
+  return res.stdout;
+}
+
 function whoamiAccountId(spawn) {
   const out = runWrangler(spawn, ["whoami", "--json"]);
   const parsed = JSON.parse(out);
@@ -198,6 +215,26 @@ export async function creationCommandProjection() {
   return projection;
 }
 
+/** CSPRNG 生成 cpu profile 凭据；拒绝预存 handoff。 */
+function generateCpuCredentials() {
+  if (statSync(HANDOFF_PATH, { throwIfNoEntry: false })) {
+    throw new Error("HANDOFF_ALREADY_EXISTS");
+  }
+  const secret = randomBytes(32).toString("hex"); // 256-bit
+  const pathSegment = randomBytes(16).toString("base64url"); // 128-bit URL-safe
+  const sessionNonce = randomBytes(32).toString("hex"); // 256-bit
+  return { secret, pathSegment, sessionNonce };
+}
+
+/** 独占创建 handoff（目录 0700、文件 0600）。 */
+function writeHandoff({ secret, pathSegment, sessionNonce }) {
+  mkdirSync(HANDOFF_DIR, { recursive: true, mode: 0o700 });
+  chmodSync(HANDOFF_DIR, 0o700);
+  const fd = openSync(HANDOFF_PATH, "wx", 0o600);
+  writeFileSync(fd, JSON.stringify({ secret, pathSegment, sessionNonce }) + "\n");
+  chmodSync(HANDOFF_PATH, 0o600);
+}
+
 export async function runDeploy({ profile, spawn = defaultSpawn, fetchImpl = defaultFetch, checkedAt = new Date().toISOString() }) {
   if (!PROFILES.includes(profile)) throw new Error(`UNKNOWN_PROFILE: ${profile}`);
   const config = loadWranglerConfig();
@@ -208,6 +245,39 @@ export async function runDeploy({ profile, spawn = defaultSpawn, fetchImpl = def
   const manifestSha256 = await canonicalJsonHash(manifest);
   const configSha256 = await canonicalJsonHash(config);
 
+  // cpu/cleanup 专用状态
+  let cpuCredentials = null;
+  let secretSha256 = null;
+  let pathSegmentSha256 = null;
+  let handoffSessionNonceSha256 = null;
+  let secretBindingDeleted = false;
+  let pathBindingDeleted = false;
+  let cpuRoute404 = false;
+
+  if (profile === "cpu") {
+    cpuCredentials = generateCpuCredentials();
+    secretSha256 = sha256Hex(cpuCredentials.secret);
+    pathSegmentSha256 = sha256Hex(cpuCredentials.pathSegment);
+    handoffSessionNonceSha256 = sha256Hex(cpuCredentials.sessionNonce);
+    // stdin 注入两个 secret binding
+    runWranglerInput(spawn, ["versions", "secret", "put", CPU_SECRET_BINDING], cpuCredentials.secret);
+    runWranglerInput(spawn, ["versions", "secret", "put", CPU_PATH_BINDING], cpuCredentials.pathSegment);
+  } else if (profile === "cleanup") {
+    // 删除两个临时 binding（失败不致命，继续覆盖部署）
+    try {
+      runWrangler(spawn, ["versions", "secret", "delete", CPU_SECRET_BINDING]);
+      secretBindingDeleted = true;
+    } catch {
+      secretBindingDeleted = false;
+    }
+    try {
+      runWrangler(spawn, ["versions", "secret", "delete", CPU_PATH_BINDING]);
+      pathBindingDeleted = true;
+    } catch {
+      pathBindingDeleted = false;
+    }
+  }
+
   // 1. migration
   let migrationOk = true;
   try {
@@ -217,11 +287,17 @@ export async function runDeploy({ profile, spawn = defaultSpawn, fetchImpl = def
     throw err;
   }
 
-  // 2. deploy（捕获 stdout 提取 Worker URL）
+  // 2. deploy（--var 覆盖 profile 开关）
+  const deployArgs = ["deploy", "--strict", "--message", "phase0-go-no-go"];
+  if (profile === "cpu") {
+    deployArgs.push("--var", "PHASE0_CAPTURE:false", "--var", "PHASE0_CPU_LIMIT_PROBE:true");
+  } else if (profile === "cleanup") {
+    deployArgs.push("--var", "PHASE0_CAPTURE:false", "--var", "PHASE0_CPU_LIMIT_PROBE:false");
+  }
   let deployOk = true;
   let deployStdout = "";
   try {
-    deployStdout = runWrangler(spawn, ["deploy", "--strict", "--message", "phase0-go-no-go"]);
+    deployStdout = runWrangler(spawn, deployArgs);
   } catch (err) {
     deployOk = false;
     throw err;
@@ -250,9 +326,22 @@ export async function runDeploy({ profile, spawn = defaultSpawn, fetchImpl = def
     versionOk = false;
   }
 
+  // 5. cpu/cleanup 专用复查
+  if (profile === "cpu") {
+    // CPU-limit 路由带完整认证应可达（probe 开启）；其他 /__phase0/* 404 由 measure-cpu 复查
+    writeHandoff(cpuCredentials);
+  } else if (profile === "cleanup") {
+    try {
+      const res = await fetchImpl(`${url}/__phase0/cpu-limit/whatever`, { method: "POST" });
+      cpuRoute404 = res.status === 404;
+    } catch {
+      cpuRoute404 = false;
+    }
+  }
+
   const artifact = {
     profile,
-    captureEnabled: config.vars.PHASE0_CAPTURE === "true",
+    captureEnabled: profile === "probes" ? config.vars.PHASE0_CAPTURE === "true" : false,
     workerUrl: url,
     deploymentId,
     versionIds,
@@ -286,6 +375,22 @@ export async function runDeploy({ profile, spawn = defaultSpawn, fetchImpl = def
     }
     artifact.queueProjections = queueProjections;
     artifact.creationCommandProjection = await creationCommandProjection();
+  } else if (profile === "cpu") {
+    artifact.secretBindingName = CPU_SECRET_BINDING;
+    artifact.pathBindingName = CPU_PATH_BINDING;
+    artifact.secretSha256 = secretSha256;
+    artifact.pathSegmentSha256 = pathSegmentSha256;
+    artifact.handoffSessionNonceSha256 = handoffSessionNonceSha256;
+    artifact.credentialsGeneratedAt = checkedAt;
+    artifact.credentialsAlgorithm = "CSPRNG(randomBytes)";
+    artifact.probeEnabled = true;
+    artifact.limitsCpuMsAbsent = !JSON.stringify(config).includes("cpu_ms");
+  } else if (profile === "cleanup") {
+    artifact.secretBindingDeleted = secretBindingDeleted;
+    artifact.pathBindingDeleted = pathBindingDeleted;
+    artifact.probeEnabled = false;
+    artifact.limitsCpuMsAbsent = !JSON.stringify(config).includes("cpu_ms");
+    artifact.cpuRoute404 = cpuRoute404;
   }
 
   artifact.passed =
@@ -295,8 +400,14 @@ export async function runDeploy({ profile, spawn = defaultSpawn, fetchImpl = def
 
 export async function main(argv) {
   const args = parseArgs(argv);
-  const { profile, out } = args;
-  if (!profile || !out) throw new Error("Usage: deploy.mjs --profile probes|cpu|clients|cleanup --out <path>");
+  const { profile, out, from } = args;
+  if (!profile || !out) throw new Error("Usage: deploy.mjs --profile probes|cpu|clients|cleanup --out <path> [--from <deploy-cpu.json>]");
+  if (profile === "cleanup" && from) {
+    // 校验 cleanup 的 from 是本次 cpu deployment
+    const cpuArtifact = JSON.parse(readFileSync(from, "utf8"));
+    if (cpuArtifact.profile !== "cpu") throw new Error("CLEANUP_FROM_NOT_CPU");
+    if (cpuArtifact.passed !== true) throw new Error("CLEANUP_FROM_NOT_PASSED");
+  }
   const artifact = await runDeploy({ profile });
   const sha = await canonicalJsonHash(artifact);
   artifact.canonicalSha256 = sha;

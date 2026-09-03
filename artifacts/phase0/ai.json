@@ -1,0 +1,36 @@
+{
+  "profile": "probes",
+  "deploymentId": "395b2fbf-01a1-4757-95a9-2191e38b8bb9",
+  "versionIds": [
+    "e08dc55c-4e82-42e7-ba19-c29e1e2800c7"
+  ],
+  "workerUrl": "https://karaclone-phase0.gowinder.workers.dev",
+  "sourceDeploySha256": "712abc1b38e6cd2044868c9b60bd2df5f6a8a22c307a90cfb6e244c3dd24a7cd",
+  "checks": {
+    "http200": true,
+    "validJson": true,
+    "modelExact": true,
+    "validated": true,
+    "tagsCount": 8,
+    "tagsInRange": true,
+    "tagsNonEmpty": true,
+    "descriptionOk": true
+  },
+  "model": "@cf/meta/llama-3.1-8b-instruct-fast",
+  "tags": [
+    "AI",
+    "JSON",
+    "Bookmark",
+    "Chinese",
+    "Programming",
+    "Technology",
+    "ArtificialIntelligence",
+    "MachineLearning"
+  ],
+  "description": "Public text for AI JSON mode verification",
+  "http1102Count": 0,
+  "error": null,
+  "checkedAt": "2026-09-03T08:33:49.017Z",
+  "canonicalSha256": "7b9e8ff59fd630eca79ef38a8fb243ff2d78814380ed5e785ec0eec2e5fa2bbf",
+  "passed": true
+}

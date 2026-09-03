@@ -1,16 +1,16 @@
 {
-  "deploymentId": "28d1e022-d7f6-4e3a-b477-0db20cc06d7d",
+  "deploymentId": "395b2fbf-01a1-4757-95a9-2191e38b8bb9",
   "versionIds": [
-    "50d98bfb-70a1-4ef2-95ea-d939b01acf01"
+    "e08dc55c-4e82-42e7-ba19-c29e1e2800c7"
   ],
   "profile": "probes",
   "workerUrl": "https://karaclone-phase0.gowinder.workers.dev",
-  "sourceDeploySha256": "c09181f3d87c02bb4d4696cebb5b7f7fe39906badadc2fd8350a01de9099c67a",
+  "sourceDeploySha256": "2a8fa1c3bf3d01d7da21e6c56e5936e2cb2ea57161a73fd4e3709273a5cd7771",
   "userId": "user_5346b7b3a13f0e34",
   "keyId": "30d9e7b46201f2d0b866",
   "createdAt": "2026-09-03T04:31:08.612Z",
-  "checkedAt": "2026-09-03T04:31:03.995Z",
-  "canonicalSha256": "8bbc0a69aeac33f9ee33f154a0f4053437eaee24b3cb741ce26574297e68ac77",
+  "checkedAt": "2026-09-03T07:30:00.000Z",
+  "canonicalSha256": "90659ff046ff4b6f2e680c5bdbf135b114a59625c7d48efb1bb1f164d74fd493",
   "passed": true,
   "devVarsMode": "600",
   "devVarsModeOk": true

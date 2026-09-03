@@ -10,6 +10,10 @@ const nodeTests = [
   "test/package-verifiers.test.ts",
   "test/preflight.test.ts",
   "test/workers-plan-entitlement.test.ts",
+  "test/phase0-scripts.test.ts",
+  "test/decision.test.ts",
+  "test/replay-final-store.test.ts",
+  "test/extension-store-content-binding.test.ts",
 ];
 
 export default defineConfig({

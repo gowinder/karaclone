@@ -1,0 +1,152 @@
+{
+  "profile": "probes",
+  "deploymentId": "395b2fbf-01a1-4757-95a9-2191e38b8bb9",
+  "versionIds": [
+    "e08dc55c-4e82-42e7-ba19-c29e1e2800c7"
+  ],
+  "workerUrl": "https://karaclone-phase0.gowinder.workers.dev",
+  "sourceDeploySha256": "712abc1b38e6cd2044868c9b60bd2df5f6a8a22c307a90cfb6e244c3dd24a7cd",
+  "checks": {
+    "retryDlqPassed": true,
+    "retryDlq": {
+      "attempts": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "requestedDelays": [
+        30,
+        300,
+        1800
+      ],
+      "actualGaps": [
+        30.648,
+        301.302,
+        1800.937
+      ],
+      "finalJobStatus": "dead",
+      "finalTaggingStatus": "failure",
+      "dlqReceived": true,
+      "timedOut": false
+    },
+    "cronAuditPassed": true,
+    "cronFailureRecoveryPassed": true,
+    "cron": {
+      "failInFirstSelection": true,
+      "failIsFirst": true,
+      "firstInvocation": {
+        "invocationId": "31b8a8a5-0e4c-4637-bdf6-88d8997d5371",
+        "scheduledAt": "2026-09-03T09:00:26.400Z",
+        "selectedCount": 10,
+        "sentCount": 9,
+        "failedCount": 1,
+        "jobs": [
+          {
+            "jobId": "274196c3-4ea9-419c-8c40-39bc15f46b09",
+            "sendResult": "sent",
+            "sendDelaySeconds": null,
+            "errorCode": null
+          },
+          {
+            "jobId": "54a37c22-cc44-4200-9a7a-5c93a308c195",
+            "sendResult": "sent",
+            "sendDelaySeconds": null,
+            "errorCode": null
+          },
+          {
+            "jobId": "63bb4e20-8018-41ca-9512-f395f48d96ae",
+            "sendResult": "sent",
+            "sendDelaySeconds": null,
+            "errorCode": null
+          },
+          {
+            "jobId": "85b4b068-fc38-4880-95db-f053174c2764",
+            "sendResult": "sent",
+            "sendDelaySeconds": null,
+            "errorCode": null
+          },
+          {
+            "jobId": "9aef7a28-dfc7-4883-aa09-7ed2cfa48944",
+            "sendResult": "sent",
+            "sendDelaySeconds": null,
+            "errorCode": null
+          },
+          {
+            "jobId": "9b614d4b-13d6-4eb5-a0d5-9483d3817b00",
+            "sendResult": "sent",
+            "sendDelaySeconds": null,
+            "errorCode": null
+          },
+          {
+            "jobId": "bc3d5484-9703-4c61-970a-c6b1f554379d",
+            "sendResult": "sent",
+            "sendDelaySeconds": null,
+            "errorCode": null
+          },
+          {
+            "jobId": "ea7bade3-e26c-45be-a8df-b9eabe801caa",
+            "sendResult": "sent",
+            "sendDelaySeconds": null,
+            "errorCode": null
+          },
+          {
+            "jobId": "eda03f53-ce75-4646-99e5-e797c6098885",
+            "sendResult": "failed",
+            "sendDelaySeconds": 86401,
+            "errorCode": "Invalid message delay: Expected a number between 0 and 86400, received 86401 (10210)"
+          },
+          {
+            "jobId": "f7d3195c-f50c-4c60-b335-2ef9552b59c4",
+            "sendResult": "sent",
+            "sendDelaySeconds": null,
+            "errorCode": null
+          }
+        ]
+      },
+      "secondInvocation": {
+        "invocationId": "ee56b99e-ffa5-4a3a-af99-78f77c95e988",
+        "scheduledAt": "2026-09-03T10:00:26.408Z",
+        "selectedCount": 3,
+        "sentCount": 3,
+        "failedCount": 0,
+        "jobs": [
+          {
+            "jobId": "179c9a4d-c600-49bf-a96b-4ad24c52f08e",
+            "sendResult": "sent",
+            "sendDelaySeconds": null,
+            "errorCode": null
+          },
+          {
+            "jobId": "be177598-ccf9-4af5-8bbc-c2ee69b5e078",
+            "sendResult": "sent",
+            "sendDelaySeconds": null,
+            "errorCode": null
+          },
+          {
+            "jobId": "eda03f53-ce75-4646-99e5-e797c6098885",
+            "sendResult": "sent",
+            "sendDelaySeconds": null,
+            "errorCode": null
+          }
+        ]
+      },
+      "timedOut": false
+    },
+    "payloadExactKeys": true,
+    "payloadBytesLt2048": true,
+    "invalidDelayRejected": true,
+    "failedJobStayedPending": true,
+    "oneShotFlagCleared": true,
+    "nextCronSentWithoutOptions": true,
+    "nextCronConsumed": true
+  },
+  "error": null,
+  "checkedAt": "2026-09-03T10:07:01.129Z",
+  "canonicalSha256": "6f1a0f6a40079458630aa6a313ea99c3989097972d85ae425b167a15477248d1",
+  "passed": true,
+  "resumed": {
+    "jobId": "a1d3b38e-07d0-4583-970d-86947066ee8f",
+    "failJobId": "eda03f53-ce75-4646-99e5-e797c6098885"
+  }
+}
