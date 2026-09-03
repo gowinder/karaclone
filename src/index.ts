@@ -18,6 +18,7 @@ import { handleQueueProbe } from "./phase0/queue-probe.js";
 import { handleAiProbe } from "./phase0/ai-probe.js";
 import { handleEnrichmentBatch } from "./queue/consumer.js";
 import { handleAssetUpload, handleAssetGet } from "./http/assets.js";
+import { handleDashboard } from "./http/dashboard.js";
 import { handleDlqBatch } from "./queue/dlq.js";
 import { runCronInvocation } from "./queue/cron.js";
 
@@ -76,6 +77,13 @@ export default {
     }
     if (url.pathname === "/api/version") {
       const res = versionResponse(env.SERVER_VERSION);
+      void captureRouteEvent(req, res, env, ctx);
+      return res;
+    }
+
+    // 4b. 面板
+    if (url.pathname === "/dashboard" || url.pathname === "/") {
+      const res = await handleDashboard(env);
       void captureRouteEvent(req, res, env, ctx);
       return res;
     }
