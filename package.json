@@ -1,0 +1,16 @@
+{
+  "name": "karaclone-phase0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --max-workers=1 --no-isolate",
+    "phase0:preflight": "node scripts/phase0/write-preflight.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "26.4.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11",
+    "wrangler": "4.128.0"
+  }
+}

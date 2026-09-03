@@ -1,0 +1,89 @@
+{
+  "android": {
+    "lockStatus": "PENDING",
+    "client": "mobile",
+    "platform": "android",
+    "version": "1.11.0",
+    "build": "45",
+    "packageId": "app.hoarder.hoardermobile",
+    "packageSha256": "eb6891a77f1d6471f6139622e2f9242f24fae100ec6f9b0f63d044dfaaa37eab",
+    "packageSize": 150947254,
+    "immutableSourceUrl": "https://github.com/karakeep-app/mobile-releases/releases/download/1.11.0/karakeep.apk",
+    "finalUrl": "https://github.com/karakeep-app/mobile-releases/releases/download/1.11.0/karakeep.apk",
+    "assetId": 536907626,
+    "sourceRepository": "https://github.com/karakeep-app/mobile-releases",
+    "sourceTag": "1.11.0",
+    "sourceCommit": "2f988f02440c0690d19905429f81d3f946cba8ae",
+    "signingCertificateSha256": "0A:9F:4A:6B:90:0B:DA:E4:D4:AD:7E:F3:E7:D7:73:90:1D:87:08:84:1A:DB:29:4C:49:4B:18:2A:1E:81:C3:D9",
+    "signerAllowList": [
+      "0A:9F:4A:6B:90:0B:DA:E4:D4:AD:7E:F3:E7:D7:73:90:1D:87:08:84:1A:DB:29:4C:49:4B:18:2A:1E:81:C3:D9"
+    ],
+    "verifierVersions": {
+      "android": "1.0.0"
+    },
+    "verificationProjection": {
+      "apksigner": "Signer #1 certificate SHA-256 digest:\n0A:9F:4A:6B:90:0B:DA:E4:D4:AD:7E:F3:E7:D7:73:90:1D:87:08:84:1A:DB:29:4C:49:4B:18:2A:1E:81:C3:D9",
+      "apkanalyzerManifest": "application-id: app.hoarder.hoardermobile\nversion-name: 1.11.0\nversion-code: 45",
+      "toolVersions": {
+        "apksigner": null,
+        "apkanalyzer": null
+      },
+      "verifierVersion": "1.0.0"
+    },
+    "verificationProjectionSha256": "6e5c795f7ad3350b4d8dd30e24cb058466cf80e302d784079d838fe72e90e698",
+    "canonicalSha256": null,
+    "passed": true,
+    "clientLockSha256": "3551b8431b23c269cd8141de035fd4c8e4681532fb155e142632b1192aba9fea"
+  },
+  "extension": {
+    "manifestSha256": "ed76bbac5c1f90515dbcc66458c93c18cc3883279db67962c806523986a7c318",
+    "lockStatus": "PENDING",
+    "client": "extension",
+    "platform": "chrome",
+    "version": "1.2.11",
+    "build": null,
+    "packageId": "kgcjekpmcjjogibpjebkhaanilehneje",
+    "packageSha256": "0f1de98d64dbca99ece76bdb32179f5cd219d0c4434ff24aed4b799c4743acb9",
+    "packageSize": 483921,
+    "verificationProjection": {
+      "crxRequestTemplate": "https://clients2.google.com/service/update2/crx?response=redirect&acceptformat=crx2,crx3&prodversion=11702.1301.0.0&x=id%3Dkgcjekpmcjjogibpjebkhaanilehneje%26installsource%3Dondemand%26uc",
+      "redirectChain": [
+        "https://clients2.googleusercontent.com/crx/blobs/Abe5cL65LLKyLQ9WLkWg1gGDg01nhQuL0EFNA1_6p6SUludMrzg3Sxii3haMnIMx4N3IvR7QLEBwsjDS0JqWH_H0-Q0qfhAumJb4MJ8g-xWxJlp6iTfk34XVIszYCwJEKu4AxlKa5W540Bj2IeL6PbE9hIq_qOV3EB-O/KGCJEKPMCJJOGIBPJEBKHAANILEHNEJE_1_2_11_0.crx"
+      ],
+      "redirectHostAllowList": [
+        "clients2.google.com",
+        "redirector.gvt1.com",
+        "storage.googleapis.com",
+        "ssl.gstatic.com",
+        "clients2.googleusercontent.com"
+      ],
+      "responseHeadersProjection": {
+        "contentLength": 483921,
+        "contentType": "application/x-chrome-extension"
+      },
+      "crxProof": {
+        "algorithm": "rsa",
+        "publicKeySha256": "b5e4096227b83f82101fc2aa49f2a251accde3d98471464dd17d1819b43786b0"
+      },
+      "downloadedAt": "2026-09-03T02:51:16.592Z",
+      "crxFormat": "CRX3",
+      "extensionId": "kgcjekpmcjjogibpjebkhaanilehneje",
+      "storeEvidenceSha256": "edcf7433427ce82dd35aca398491ded15adb42dffa16788bfc4dbb05c6675278",
+      "verifierVersion": "1.0.0"
+    },
+    "verificationProjectionSha256": "84966bb659f1f12098a9b0a9854101b75df8d765a125d604dfa92b2a78a398ce",
+    "canonicalSha256": "ed76bbac5c1f90515dbcc66458c93c18cc3883279db67962c806523986a7c318",
+    "passed": true,
+    "observations": {
+      "signerPublicKeySha256": "b5e4096227b83f82101fc2aa49f2a251accde3d98471464dd17d1819b43786b0",
+      "finalUrl": "https://clients2.googleusercontent.com/crx/blobs/Abe5cL65LLKyLQ9WLkWg1gGDg01nhQuL0EFNA1_6p6SUludMrzg3Sxii3haMnIMx4N3IvR7QLEBwsjDS0JqWH_H0-Q0qfhAumJb4MJ8g-xWxJlp6iTfk34XVIszYCwJEKu4AxlKa5W540Bj2IeL6PbE9hIq_qOV3EB-O/KGCJEKPMCJJOGIBPJEBKHAANILEHNEJE_1_2_11_0.crx"
+    },
+    "storeEvidenceSha256": "edcf7433427ce82dd35aca398491ded15adb42dffa16788bfc4dbb05c6675278",
+    "extensionId": "kgcjekpmcjjogibpjebkhaanilehneje",
+    "clientLockSha256": "3551b8431b23c269cd8141de035fd4c8e4681532fb155e142632b1192aba9fea"
+  },
+  "lockStatus": "RESOLVED",
+  "reviewedBy": "human-reviewer",
+  "reviewedAt": "2026-09-03T02:51:19.452Z",
+  "canonicalSha256": "8ecfe78afa121e4c455fdf43ec70a7806f3847978331e92c606b1ca1e224c1ec"
+}

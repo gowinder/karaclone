@@ -1,0 +1,91 @@
+{
+  "whoamiAccountIdSha256": "bef40fdf3e1c552e900d60686f364aa0f847a5ce4e2066a44e094b2ef14eb645",
+  "billingRequestAccountIdSha256": "bef40fdf3e1c552e900d60686f364aa0f847a5ce4e2066a44e094b2ef14eb645",
+  "pageCount": 1,
+  "totalCount": 3,
+  "projectedCount": 3,
+  "pageProjections": [
+    {
+      "page": 1,
+      "perPage": 50,
+      "totalCount": 3,
+      "count": 3,
+      "items": [
+        {
+          "subscriptionIdSha256": "717ca45194b0a8fba3f2cd037292a0549514346102371e75256335a26084d5dc",
+          "ratePlanId": "beta_analytics_engine_api",
+          "state": "Paid",
+          "price": 0,
+          "scope": "account",
+          "sets": [],
+          "isContract": true,
+          "externallyManaged": false
+        },
+        {
+          "subscriptionIdSha256": "111ce153affc0467d4569133093b205126f1b3ed112905dabcbdb6ef78dda4e4",
+          "ratePlanId": "teams_free",
+          "state": "Paid",
+          "price": 0,
+          "scope": "account",
+          "sets": [],
+          "isContract": true,
+          "externallyManaged": false
+        },
+        {
+          "subscriptionIdSha256": "4c57a81f75612a4a1b65a8e50066b7f7d91bfc14715f916ae0d1dde7b5c3b810",
+          "ratePlanId": "r2_paid",
+          "state": "Paid",
+          "price": 0,
+          "scope": "account",
+          "sets": [],
+          "isContract": false,
+          "externallyManaged": false
+        }
+      ],
+      "canonicalSha256": "c107bf233e594d7bb14dae7ec81d909fc0f9fac3d381e2a00a24dbdd0fd4f305"
+    }
+  ],
+  "uniqueSubscriptionIdCount": 3,
+  "subscriptionProjection": [
+    {
+      "subscriptionIdSha256": "111ce153affc0467d4569133093b205126f1b3ed112905dabcbdb6ef78dda4e4",
+      "ratePlanId": "teams_free",
+      "state": "Paid",
+      "price": 0,
+      "scope": "account",
+      "sets": [],
+      "isContract": true,
+      "externallyManaged": false
+    },
+    {
+      "subscriptionIdSha256": "4c57a81f75612a4a1b65a8e50066b7f7d91bfc14715f916ae0d1dde7b5c3b810",
+      "ratePlanId": "r2_paid",
+      "state": "Paid",
+      "price": 0,
+      "scope": "account",
+      "sets": [],
+      "isContract": false,
+      "externallyManaged": false
+    },
+    {
+      "subscriptionIdSha256": "717ca45194b0a8fba3f2cd037292a0549514346102371e75256335a26084d5dc",
+      "ratePlanId": "beta_analytics_engine_api",
+      "state": "Paid",
+      "price": 0,
+      "scope": "account",
+      "sets": [],
+      "isContract": true,
+      "externallyManaged": false
+    }
+  ],
+  "subscriptionProjectionSha256": "5da25391eee44da80aec5d8b1d17037f44b0860240707263328eeba43dcb7781",
+  "activeOrPendingSubscriptionCount": 3,
+  "contractOrExternallyManagedCount": 2,
+  "subscriptionRiskFree": false,
+  "upstreamCommit": "5a2f009e2f6d266087f2f3f527e6e384cefd6de4",
+  "extensionVersion": "1.2.11",
+  "mobileVersion": "1.11.0",
+  "checkedAt": "2026-09-03T02:11:09.612Z",
+  "canonicalSha256": "ba5912ef6f124c0a68d8eb1607f46d0af45e36b46b156de944f9e244176332bb",
+  "passed": false
+}
