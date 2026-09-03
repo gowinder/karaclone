@@ -71,11 +71,10 @@ describe("client bootstrap", () => {
     expect(settings.inferredTagLang).toBe("zh-CN");
   });
 
-  it("apiKeys.exchange → FORBIDDEN 精确消息", async () => {
+  it("apiKeys.exchange 未知用户 → UNAUTHORIZED", async () => {
     const c = await caller();
     await expect(c.apiKeys.exchange({ keyName: "x", email: "a@b.c", password: "password123" })).rejects.toMatchObject({
-      code: "FORBIDDEN",
-      message: "Password authentication is disabled",
+      code: "UNAUTHORIZED",
     });
   });
 

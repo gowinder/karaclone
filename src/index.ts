@@ -17,6 +17,7 @@ import {
 import { handleQueueProbe } from "./phase0/queue-probe.js";
 import { handleAiProbe } from "./phase0/ai-probe.js";
 import { handleEnrichmentBatch } from "./queue/consumer.js";
+import { handleAssetUpload, handleAssetGet } from "./http/assets.js";
 import { handleDlqBatch } from "./queue/dlq.js";
 import { runCronInvocation } from "./queue/cron.js";
 
@@ -89,8 +90,19 @@ export default {
       });
     }
 
-    // 6. 已知 /api/assets/*（Phase 0 无资产，统一 404 JSON）
-    if (url.pathname.startsWith("/api/assets/")) {
+    // 6. 资产上传与下载
+    if (url.pathname === "/api/assets" && req.method === "POST") {
+      const res = await handleAssetUpload(req, env);
+      void captureRouteEvent(req, res, env, ctx);
+      return res;
+    }
+    const assetMatch = url.pathname.match(/^\/api\/assets\/([^/]+)$/);
+    if (assetMatch && req.method === "GET") {
+      const res = await handleAssetGet(req, env, decodeURIComponent(assetMatch[1]!));
+      void captureRouteEvent(req, res, env, ctx);
+      return res;
+    }
+    if (url.pathname.startsWith("/api/assets")) {
       const res = jsonNotFound();
       void captureRouteEvent(req, res, env, ctx);
       return res;

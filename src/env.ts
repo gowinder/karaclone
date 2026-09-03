@@ -3,6 +3,7 @@
 declare global {
   interface Env {
     ALLOWED_EXTENSION_ORIGIN: string;
+    ASSETS: R2Bucket;
   }
 }
 

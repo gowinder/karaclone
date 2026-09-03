@@ -2,6 +2,9 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { publicProcedure, protectedProcedure, router } from "../base.js";
 import { authenticateApiKey } from "../../auth/api-key.js";
+import { verifyPassword } from "../../auth/password.js";
+import { findUserByEmail, generateKeyId, generateKeySecret, insertApiKey } from "../../db/users.js";
+import { sha256Hex } from "../../auth/api-key.js";
 
 export const apiKeysRouter = router({
   validate: publicProcedure
@@ -20,8 +23,38 @@ export const apiKeysRouter = router({
         scopes: z.array(z.string()).optional(),
       }),
     )
-    .mutation(() => {
-      throw new TRPCError({ code: "FORBIDDEN", message: "Password authentication is disabled" });
+    .output(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        key: z.string(),
+        createdAt: z.date(),
+        scopes: z.array(z.string()),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const user = await findUserByEmail(ctx.env.DB, input.email);
+      if (!user || !user.passwordHash || !user.passwordSalt) {
+        throw new TRPCError({ code: "UNAUTHORIZED" });
+      }
+      const valid = await verifyPassword(input.password, user.passwordHash, user.passwordSalt);
+      if (!valid) {
+        throw new TRPCError({ code: "UNAUTHORIZED" });
+      }
+      const scopes = input.scopes ?? ["fullaccess"];
+      const keyId = generateKeyId();
+      const secret = generateKeySecret();
+      const secretHash = await sha256Hex(secret);
+      const id = crypto.randomUUID();
+      await insertApiKey(ctx.env.DB, {
+        id,
+        userId: user.id,
+        keyId,
+        secretHash,
+        name: input.keyName,
+        scope: "fullaccess",
+      });
+      return { id, name: input.keyName, key: `ak2_${keyId}_${secret}`, createdAt: new Date(), scopes };
     }),
   revoke: protectedProcedure
     .input(z.object({ id: z.string() }))

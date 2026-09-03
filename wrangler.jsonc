@@ -18,6 +18,12 @@
       "database_id": "fc56ee61-d4cd-406b-8e4c-f3d3f3f2ab8c"
     }
   ],
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "karaclone-phase0-assets"
+    }
+  ],
   "vars": {
     "SERVER_VERSION": "0.1.0",
     "AI_MODEL": "@cf/meta/llama-3.1-8b-instruct-fast",

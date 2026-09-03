@@ -89,11 +89,12 @@ describe("compat mutation 拒绝", () => {
     await expect(c.assets.detachAsset({ assetId: "a1" } as never)).rejects.toMatchObject(badRequest);
   });
 
-  it("users.create / deleteAccount / changePassword → FORBIDDEN", async () => {
+  it("users.create 校验失败 / deleteAccount / changePassword → 拒绝", async () => {
     await seed();
     const c = await caller();
     const forbidden = { code: "FORBIDDEN" };
-    await expect(c.users.create({ name: "x" } as never)).rejects.toMatchObject(forbidden);
+    // create 已实现：缺字段 → 校验错误；deleteAccount/changePassword 仍 FORBIDDEN
+    await expect(c.users.create({ name: "x" } as never)).rejects.toThrow();
     await expect(c.users.deleteAccount({ password: "x" } as never)).rejects.toMatchObject(forbidden);
     await expect(c.users.changePassword({ currentPassword: "a", newPassword: "b" } as never)).rejects.toMatchObject(forbidden);
   });
