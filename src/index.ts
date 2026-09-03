@@ -15,6 +15,7 @@ import {
   handleCaptureControl,
 } from "./phase0/capture-http.js";
 import { handleQueueProbe } from "./phase0/queue-probe.js";
+import { handleAiProbe } from "./phase0/ai-probe.js";
 import { handleEnrichmentBatch } from "./queue/consumer.js";
 import { handleDlqBatch } from "./queue/dlq.js";
 import { runCronInvocation } from "./queue/cron.js";
@@ -40,6 +41,10 @@ export default {
     // 2b. Phase 0 Queue 探针接口（受认证保护）
     const queueProbe = await handleQueueProbe(req, env);
     if (queueProbe) return queueProbe;
+
+    // 2c. Phase 0 AI JSON Mode 探针（受认证保护）
+    const aiProbe = await handleAiProbe(req, env);
+    if (aiProbe) return aiProbe;
 
     // 3. tRPC
     if (url.pathname.startsWith("/api/trpc")) {

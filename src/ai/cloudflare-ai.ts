@@ -1,0 +1,37 @@
+// T10：Workers AI 调用封装。模型锁定为固定字面量，显式 unknown 双重转换，
+// 不得使用 any，不得放宽为任意模型字符串。
+export const LOCKED_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast" as const;
+
+export type TagModelInput = {
+  messages: { role: "system" | "user"; content: string }[];
+  response_format?: {
+    type: "json_schema";
+    json_schema: {
+      type: "object";
+      properties: Record<string, unknown>;
+      required: string[];
+      additionalProperties: boolean;
+    };
+  };
+};
+
+// 最小结构接口：当前 workers-types 的 AiModels 联合可能滞后于官方活跃模型目录，
+// 因此只声明我们实际消费的字段。
+type AiBinding = {
+  run: (model: string, input: unknown) => Promise<unknown>;
+};
+
+export async function runLockedTextModel(
+  ai: unknown,
+  model: string,
+  input: TagModelInput,
+): Promise<unknown> {
+  if (model !== LOCKED_MODEL) {
+    throw new Error(`Unexpected AI model: ${model}`);
+  }
+  const binding = ai as AiBinding;
+  const raw = await binding.run(LOCKED_MODEL, input);
+  // 显式 unknown 双重转换：先到 unknown，再按最小结构读取
+  const asUnknown: unknown = raw;
+  return asUnknown;
+}
