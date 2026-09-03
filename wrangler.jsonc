@@ -1,0 +1,49 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "karaclone-phase0",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-02",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": { "invocation_logs": true }
+  },
+  "ai": { "binding": "AI" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "karaclone-phase0",
+      "database_id": "fc56ee61-d4cd-406b-8e4c-f3d3f3f2ab8c"
+    }
+  ],
+  "vars": {
+    "SERVER_VERSION": "0.1.0",
+    "AI_MODEL": "@cf/meta/llama-3.1-8b-instruct-fast",
+    "PHASE0_CAPTURE": "true"
+  },
+  "triggers": {
+    "crons": ["0 * * * *"]
+  },
+  "queues": {
+    "producers": [
+      { "binding": "ENRICHMENT_QUEUE", "queue": "karaclone-phase0-enrichment" }
+    ],
+    "consumers": [
+      {
+        "queue": "karaclone-phase0-enrichment",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 3,
+        "dead_letter_queue": "karaclone-phase0-enrichment-dlq"
+      },
+      {
+        "queue": "karaclone-phase0-enrichment-dlq",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 0
+      }
+    ]
+  }
+}

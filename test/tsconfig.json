@@ -4,11 +4,11 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "lib": ["ES2023", "DOM"],
-    "types": ["node", "vitest/globals"],
+    "types": ["node", "vitest/globals", "@cloudflare/vitest-plugin/types"],
     "strict": true,
     "noEmit": true,
     "esModuleInterop": true,
     "skipLibCheck": true
   },
-  "include": ["../test/**/*.ts"]
+  "include": ["../test/**/*.ts", "../worker-configuration.d.ts"]
 }
