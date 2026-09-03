@@ -11,9 +11,18 @@ export const apiKeysRouter = router({
       if (!user) throw new TRPCError({ code: "UNAUTHORIZED" });
       return { success: true };
     }),
-  exchange: publicProcedure.mutation(() => {
-    throw new TRPCError({ code: "FORBIDDEN", message: "Password authentication is disabled" });
-  }),
+  exchange: publicProcedure
+    .input(
+      z.object({
+        keyName: z.string(),
+        email: z.string(),
+        password: z.string(),
+        scopes: z.array(z.string()).optional(),
+      }),
+    )
+    .mutation(() => {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Password authentication is disabled" });
+    }),
   revoke: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ input, ctx }) => {

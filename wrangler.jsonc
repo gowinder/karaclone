@@ -21,7 +21,8 @@
   "vars": {
     "SERVER_VERSION": "0.1.0",
     "AI_MODEL": "@cf/meta/llama-3.1-8b-instruct-fast",
-    "PHASE0_CAPTURE": "true"
+    "PHASE0_CAPTURE": "true",
+    "ALLOWED_EXTENSION_ORIGIN": "chrome-extension://kgcjekpmcjjogibpjebkhaanilehneje"
   },
   "triggers": {
     "crons": ["0 * * * *"]

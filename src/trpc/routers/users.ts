@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../base.js";
 
 const defaultSettings = {
@@ -26,4 +27,14 @@ export const usersRouter = router({
     localUser: true,
   })),
   settings: protectedProcedure.query(() => defaultSettings),
+  // Phase 0 不实现账户管理：规格要求 FORBIDDEN，不能假装成功。
+  create: protectedProcedure.mutation(() => {
+    throw new TRPCError({ code: "FORBIDDEN", message: "NOT_IMPLEMENTED_IN_PHASE0" });
+  }),
+  deleteAccount: protectedProcedure.mutation(() => {
+    throw new TRPCError({ code: "FORBIDDEN", message: "NOT_IMPLEMENTED_IN_PHASE0" });
+  }),
+  changePassword: protectedProcedure.mutation(() => {
+    throw new TRPCError({ code: "FORBIDDEN", message: "NOT_IMPLEMENTED_IN_PHASE0" });
+  }),
 });

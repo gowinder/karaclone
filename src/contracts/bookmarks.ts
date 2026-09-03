@@ -190,6 +190,7 @@ export const zGetBookmarksRequestSchema = z.object({
   cursor: zCursorV2.nullish(),
   sortOrder: z.enum(["asc", "desc"]).optional().default("desc"),
   includeContent: z.boolean().optional().default(false),
+  useCursorV2: z.boolean().optional(),
 });
 
 export const zGetBookmarksResponseSchema = z.object({

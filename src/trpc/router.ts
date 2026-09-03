@@ -1,7 +1,11 @@
 import { router } from "./base.js";
 import { apiKeysRouter } from "./routers/api-keys.js";
+import { assetsRouter } from "./routers/assets.js";
 import { bookmarksRouter } from "./routers/bookmarks.js";
 import { configRouter } from "./routers/config.js";
+import { highlightsRouter } from "./routers/highlights.js";
+import { listsRouter } from "./routers/lists.js";
+import { rulesRouter } from "./routers/rules.js";
 import { usersRouter } from "./routers/users.js";
 
 export const appRouter = router({
@@ -9,6 +13,10 @@ export const appRouter = router({
   apiKeys: apiKeysRouter,
   users: usersRouter,
   bookmarks: bookmarksRouter,
+  lists: listsRouter,
+  highlights: highlightsRouter,
+  rules: rulesRouter,
+  assets: assetsRouter,
 });
 
 export type AppRouter = typeof appRouter;
