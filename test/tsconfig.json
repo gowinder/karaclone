@@ -10,5 +10,5 @@
     "esModuleInterop": true,
     "skipLibCheck": true
   },
-  "include": ["../test/**/*.ts", "../worker-configuration.d.ts"]
+  "include": ["../test/**/*.ts", "../worker-configuration.d.ts", "../src/env.ts"]
 }

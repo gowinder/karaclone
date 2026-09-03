@@ -14,6 +14,10 @@ import {
   captureTrpcHttp,
   handleCaptureControl,
 } from "./phase0/capture-http.js";
+import { handleQueueProbe } from "./phase0/queue-probe.js";
+import { handleEnrichmentBatch } from "./queue/consumer.js";
+import { handleDlqBatch } from "./queue/dlq.js";
+import { runCronInvocation } from "./queue/cron.js";
 
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -33,6 +37,10 @@ export default {
     const control = await handleCaptureControl(req, env);
     if (control) return control;
 
+    // 2b. Phase 0 Queue 探针接口（受认证保护）
+    const queueProbe = await handleQueueProbe(req, env);
+    if (queueProbe) return queueProbe;
+
     // 3. tRPC
     if (url.pathname.startsWith("/api/trpc")) {
       const res = fetchRequestHandler({
@@ -47,7 +55,7 @@ export default {
       const headers = corsHeaders(req, allowedOrigin);
       return res.then((r) => {
         const merged = new Response(r.body, r);
-        for (const [k, v] of headers) merged.headers.set(k, v);
+        headers.forEach((v, k) => merged.headers.set(k, v));
         void captureTrpcHttp(req, merged, env, ctx);
         void captureRouteEvent(req, merged, env, ctx);
         return merged;
@@ -93,9 +101,16 @@ export default {
     void captureRouteEvent(req, res, env, ctx);
     return res;
   },
-  // T9 前的最小占位：wrangler.jsonc 声明了 queue consumer，
-  // workerd 测试环境要求入口定义 queue()。
-  async queue(batch: MessageBatch<unknown>): Promise<void> {
-    console.error(JSON.stringify({ event: "queue_unimplemented", messages: batch.messages.length }));
+
+  async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
+    if (batch.queue === "karaclone-phase0-enrichment-dlq") {
+      await handleDlqBatch(env.DB, batch);
+      return;
+    }
+    await handleEnrichmentBatch(env.DB, batch);
+  },
+
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+    await runCronInvocation(env.DB, env.ENRICHMENT_QUEUE, env.PHASE0_CAPTURE === "true");
   },
 } satisfies ExportedHandler<Env>;
