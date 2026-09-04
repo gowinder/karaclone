@@ -267,6 +267,22 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     loadLlmConfig();
   });
 
+  var DEFAULT_BASE_URLS = {
+    "workers-ai": "",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "ollama-cloud": "https://ollama.com"
+  };
+
+  document.getElementById("llm-provider").addEventListener("change", function () {
+    var urlEl = document.getElementById("llm-base-url");
+    var current = urlEl.value.trim();
+    // 当前值为空或等于任一已知默认值 → 替换为新 provider 默认
+    var isDefault = !current || Object.values(DEFAULT_BASE_URLS).indexOf(current) !== -1;
+    if (isDefault) {
+      urlEl.value = DEFAULT_BASE_URLS[document.getElementById("llm-provider").value] || "";
+    }
+  });
+
   function fillModelSelect(sel, models, kind, current) {
     sel.innerHTML = "";
     var opts = models.filter(function (m) { return m.kind === kind; });
