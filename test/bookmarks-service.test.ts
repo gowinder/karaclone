@@ -9,6 +9,9 @@ import {
 
 const USER_ID = "user_svc";
 const sends: unknown[] = [];
+const noFetch = async () =>
+  new Response("<html><head><title>T</title></head></html>", { status: 200, headers: { "Content-Type": "text/html" } });
+
 const fakeQueue = {
   send: async (payload: unknown) => {
     sends.push(payload);
@@ -32,6 +35,7 @@ describe("bookmarks service", () => {
       url: "https://example.com/a",
       title: "A",
       source: "extension",
+    fetchImpl: noFetch,
     });
     expect(first.created).toBe(true);
     expect(sends).toHaveLength(1);
@@ -47,12 +51,14 @@ describe("bookmarks service", () => {
       url: "https://example.com/dup#frag",
       title: "First",
       source: "extension",
+    fetchImpl: noFetch,
     });
     const second = await createBookmark(env.DB, fakeQueue, {
       userId: USER_ID,
       url: "https://example.com/dup",
       title: "Second",
       source: "extension",
+    fetchImpl: noFetch,
     });
     expect(first.created).toBe(true);
     expect(second.created).toBe(false);
@@ -65,8 +71,10 @@ describe("bookmarks service", () => {
       .bind("user_svc2", "U2", null, Date.now())
       .run();
     sends.length = 0;
-    const a = await createBookmark(env.DB, fakeQueue, { userId: USER_ID, url: "https://example.com/shared", source: "extension" });
-    const b = await createBookmark(env.DB, fakeQueue, { userId: "user_svc2", url: "https://example.com/shared", source: "extension" });
+    const a = await createBookmark(env.DB, fakeQueue, { userId: USER_ID, url: "https://example.com/shared", source: "extension", fetchImpl: noFetch,
+    });
+    const b = await createBookmark(env.DB, fakeQueue, { userId: "user_svc2", url: "https://example.com/shared", source: "extension", fetchImpl: noFetch,
+    });
     expect(a.created).toBe(true);
     expect(b.created).toBe(true);
     expect(sends).toHaveLength(2);
@@ -76,7 +84,8 @@ describe("bookmarks service", () => {
     await seed();
     sends.length = 0;
     for (let i = 0; i < 25; i++) {
-      await createBookmark(env.DB, fakeQueue, { userId: USER_ID, url: `https://example.com/p${i}`, source: "extension" });
+      await createBookmark(env.DB, fakeQueue, { userId: USER_ID, url: `https://example.com/p${i}`, source: "extension", fetchImpl: noFetch,
+    });
     }
     const page1 = await getBookmarks(env.DB, USER_ID, { limit: 20, cursor: null, archived: false });
     expect(page1.bookmarks).toHaveLength(20);
@@ -90,7 +99,8 @@ describe("bookmarks service", () => {
   it("归档过滤", async () => {
     await seed();
     sends.length = 0;
-    const bm = await createBookmark(env.DB, fakeQueue, { userId: USER_ID, url: "https://example.com/arch", source: "extension" });
+    const bm = await createBookmark(env.DB, fakeQueue, { userId: USER_ID, url: "https://example.com/arch", source: "extension", fetchImpl: noFetch,
+    });
     await env.DB.prepare("UPDATE bookmarks SET archived = 1 WHERE id = ?").bind(bm.bookmark.id).run();
     const active = await getBookmarks(env.DB, USER_ID, { limit: 20, cursor: null, archived: false });
     expect(active.bookmarks.some((b) => b.id === bm.bookmark.id)).toBe(false);
@@ -101,7 +111,8 @@ describe("bookmarks service", () => {
   it("阅读进度 upsert", async () => {
     await seed();
     sends.length = 0;
-    const bm = await createBookmark(env.DB, fakeQueue, { userId: USER_ID, url: "https://example.com/prog", source: "extension" });
+    const bm = await createBookmark(env.DB, fakeQueue, { userId: USER_ID, url: "https://example.com/prog", source: "extension", fetchImpl: noFetch,
+    });
     await updateReadingProgress(env.DB, {
       userId: USER_ID,
       bookmarkId: bm.bookmark.id,

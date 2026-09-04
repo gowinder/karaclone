@@ -1,11 +1,13 @@
 import { canonicalizeUrl } from "../url/canonicalize.js";
 import { parseQueueMessage } from "../queue/contracts.js";
+import { fetchPageMeta } from "./page-meta.js";
 
 export interface CreateBookmarkInput {
   userId: string;
   url: string;
   title?: string | null;
   source?: string | null;
+  fetchImpl?: typeof fetch;
 }
 
 export interface ServiceBookmark {
@@ -15,6 +17,8 @@ export interface ServiceBookmark {
   title: string | null;
   note: string | null;
   summary: string | null;
+  description: string | null;
+  favicon: string | null;
   archived: boolean;
   favourited: boolean;
   source: "api" | "web" | "cli" | "mobile" | "extension" | "singlefile" | "rss" | "import" | null;
@@ -59,6 +63,8 @@ interface BookmarkDbRow {
   tagging_status: string | null;
   created_at: number;
   modified_at: number | null;
+  description: string | null;
+  favicon: string | null;
 }
 
 function mapRow(row: BookmarkDbRow): ServiceBookmark {
@@ -76,6 +82,8 @@ function mapRow(row: BookmarkDbRow): ServiceBookmark {
     taggingStatus: row.tagging_status as "pending" | "success" | "failure" | null,
     createdAt: new Date(row.created_at),
     modifiedAt: row.modified_at === null ? null : new Date(row.modified_at),
+    description: row.description ?? null,
+    favicon: row.favicon ?? null,
   };
 }
 
@@ -99,15 +107,19 @@ export async function createBookmark(
   const title = input.title ?? null;
   const source = input.source ?? null;
 
+  // 抓取网页简介（失败不阻塞创建）
+  const meta = await fetchPageMeta(canonical, { fetchImpl: input.fetchImpl });
+  const metaTitle = title ?? meta.title;
+
   await db.batch([
     db
       .prepare(
         "INSERT INTO bookmarks (id, user_id, canonical_url, title, source, crawl_status, tagging_status, created_at, modified_at) VALUES (?, ?, ?, ?, ?, 'pending', 'pending', ?, ?)",
       )
-      .bind(id, input.userId, canonical, title, source, now, now),
+      .bind(id, input.userId, canonical, metaTitle, source, now, now),
     db
-      .prepare("INSERT INTO bookmark_links (id, url, title) VALUES (?, ?, ?)")
-      .bind(id, canonical, title),
+      .prepare("INSERT INTO bookmark_links (id, url, title, description, favicon, crawled_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .bind(id, canonical, metaTitle, meta.description, meta.favicon, now),
     db
       .prepare(
         "INSERT INTO enrichment_jobs (id, bookmark_id, user_id, url_snapshot, status, attempt, created_at, updated_at) VALUES (?, ?, ?, ?, 'pending', 0, ?, ?)",
@@ -141,19 +153,21 @@ export async function getBookmarks(
   const { limit, cursor, archived } = opts;
   const archivedInt = archived ? 1 : 0;
 
+  const select = `SELECT b.*, l.description, l.favicon
+    FROM bookmarks b LEFT JOIN bookmark_links l ON l.id = b.id`;
   let rows: BookmarkDbRow[];
   if (cursor) {
     const cursorMs = cursor.createdAt.getTime();
     rows = await db
       .prepare(
-        "SELECT * FROM bookmarks WHERE user_id = ? AND archived = ? AND ((created_at < ?) OR (created_at = ? AND id < ?)) ORDER BY created_at DESC, id DESC LIMIT ?",
+        `${select} WHERE b.user_id = ? AND b.archived = ? AND ((b.created_at < ?) OR (b.created_at = ? AND b.id < ?)) ORDER BY b.created_at DESC, b.id DESC LIMIT ?`,
       )
       .bind(userId, archivedInt, cursorMs, cursorMs, cursor.id, limit + 1)
       .all<BookmarkDbRow>()
       .then((r) => (r.results ?? []) as BookmarkDbRow[]);
   } else {
     rows = await db
-      .prepare("SELECT * FROM bookmarks WHERE user_id = ? AND archived = ? ORDER BY created_at DESC, id DESC LIMIT ?")
+      .prepare(`${select} WHERE b.user_id = ? AND b.archived = ? ORDER BY b.created_at DESC, b.id DESC LIMIT ?`)
       .bind(userId, archivedInt, limit + 1)
       .all<BookmarkDbRow>()
       .then((r) => (r.results ?? []) as BookmarkDbRow[]);

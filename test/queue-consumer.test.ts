@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { parseQueueMessage, type QueueMessage } from "../src/queue/contracts";
 import { sha256Hex } from "../src/auth/api-key";
 import { runCronInvocation } from "../src/queue/cron";
+import { encryptSecret } from "../src/auth/secret-box";
+import { handleEnrichmentBatch } from "../src/queue/consumer";
 import worker from "../src/index";
 
 const ADMIN_USER_ID = "user_q_admin";
@@ -134,6 +136,61 @@ describe("queue consumer 重试与状态迁移", () => {
     expect(result.explicitAcks).toContain(`msg_${jobId}_1`);
     const job = await env.DB.prepare("SELECT status FROM enrichment_jobs WHERE id = ?").bind(jobId).first<{ status: string }>();
     expect(job?.status).toBe("success");
+  });
+
+  it("普通 job + openrouter 配置 → 打标签写 tags/summary", async () => {
+    await seedAdmin();
+    const jobId = "job_llm";
+    const bookmarkId = "bm_llm";
+    await seedProbeJob(jobId, bookmarkId, 0);
+    // 配置 openrouter LLM（真实加密 key）
+    const encKey = await encryptSecret("sk-or-test", "test-key");
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO user_llm_config (user_id, provider, base_url, api_key_enc, model, updated_at) VALUES (?, 'openrouter', 'https://openrouter.ai/api/v1', ?, 'anthropic/claude-3.5-sonnet', ?)",
+    )
+      .bind(ADMIN_USER_ID, encKey, Date.now())
+      .run();
+    // 注入 fake fetch 返回 OpenAI 格式
+    const fakeFetch = async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: JSON.stringify({ tags: ["ai", "读书"], description: "测试摘要" }) } }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    const batch = createMessageBatch("karaclone-phase0-enrichment", [makeMessage(jobId, bookmarkId, 1)]);
+    await handleEnrichmentBatch(env.DB, batch, { ...env, LLM_CONFIG_KEY: "test-key" } as unknown as Env, { fetchImpl: fakeFetch });
+    const job = await env.DB.prepare("SELECT status FROM enrichment_jobs WHERE id = ?").bind(jobId).first<{ status: string }>();
+    expect(job?.status).toBe("success");
+    const bm = await env.DB.prepare("SELECT tagging_status, summary FROM bookmarks WHERE id = ?").bind(bookmarkId).first<{ tagging_status: string; summary: string | null }>();
+    expect(bm?.tagging_status).toBe("success");
+    expect(bm?.summary).toBe("测试摘要");
+    const tags = await env.DB.prepare(
+      "SELECT t.name FROM bookmark_tags bt JOIN tags t ON t.id = bt.tag_id WHERE bt.bookmark_id = ?",
+    )
+      .bind(bookmarkId)
+      .all<{ name: string }>();
+    expect(tags.results.map((r) => r.name).sort()).toEqual(["ai", "读书"]);
+  });
+
+  it("普通 job + LLM 失败 → tagging failure 但 job success", async () => {
+    await seedAdmin();
+    const jobId = "job_llm_fail";
+    const bookmarkId = "bm_llm_fail";
+    await seedProbeJob(jobId, bookmarkId, 0);
+    const encKey = await encryptSecret("sk-or-test", "test-key");
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO user_llm_config (user_id, provider, base_url, api_key_enc, model, updated_at) VALUES (?, 'openrouter', 'https://openrouter.ai/api/v1', ?, 'anthropic/claude-3.5-sonnet', ?)",
+    )
+      .bind(ADMIN_USER_ID, encKey, Date.now())
+      .run();
+    const fakeFetch = async () => new Response("bad gateway", { status: 502 });
+    const batch = createMessageBatch("karaclone-phase0-enrichment", [makeMessage(jobId, bookmarkId, 1)]);
+    await handleEnrichmentBatch(env.DB, batch, { ...env, LLM_CONFIG_KEY: "test-key" } as unknown as Env, { fetchImpl: fakeFetch });
+    const job = await env.DB.prepare("SELECT status FROM enrichment_jobs WHERE id = ?").bind(jobId).first<{ status: string }>();
+    expect(job?.status).toBe("success");
+    const bm = await env.DB.prepare("SELECT tagging_status FROM bookmarks WHERE id = ?").bind(bookmarkId).first<{ tagging_status: string }>();
+    expect(bm?.tagging_status).toBe("failure");
   });
 });
 

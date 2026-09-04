@@ -37,7 +37,7 @@ function toContractBookmark(bm: ServiceBookmark): z.infer<typeof zBookmarkSchema
       type: "link" as const,
       url: bm.canonicalUrl,
       title: bm.title ?? bm.canonicalUrl,
-      description: null,
+      description: bm.description,
       imageUrl: null,
       imageAssetId: null,
       screenshotAssetId: null,
@@ -45,7 +45,7 @@ function toContractBookmark(bm: ServiceBookmark): z.infer<typeof zBookmarkSchema
       fullPageArchiveAssetId: null,
       precrawledArchiveAssetId: null,
       videoAssetId: null,
-      favicon: null,
+      favicon: bm.favicon,
       htmlContent: null,
       contentAssetId: null,
       readerViewStatus: null,
@@ -141,6 +141,8 @@ export const bookmarksRouter = router({
         taggingStatus: row.tagging_status as "pending" | "success" | "failure" | null,
         createdAt: new Date(row.created_at),
         modifiedAt: row.modified_at === null ? null : new Date(row.modified_at),
+        description: null,
+        favicon: null,
       };
       const contract = toContractBookmark(bm);
       if (input.includeContent && contract.content.type === "link") {

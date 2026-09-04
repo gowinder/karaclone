@@ -7,6 +7,7 @@ import { highlightsRouter } from "./routers/highlights.js";
 import { listsRouter } from "./routers/lists.js";
 import { rulesRouter } from "./routers/rules.js";
 import { tagsRouter } from "./routers/tags.js";
+import { llmRouter } from "./routers/llm.js";
 import { usersRouter } from "./routers/users.js";
 
 export const appRouter = router({
@@ -18,6 +19,7 @@ export const appRouter = router({
   highlights: highlightsRouter,
   rules: rulesRouter,
   tags: tagsRouter,
+  llm: llmRouter,
   assets: assetsRouter,
 });
 

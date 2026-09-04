@@ -78,8 +78,13 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   </div>
 
   <div id="app-view" class="hidden">
-    <div class="card">
-      <h2>保存书签</h2>
+    <div class="tabs">
+      <div id="tab-bookmarks" class="tab active">书签</div>
+      <div id="tab-settings" class="tab">设置</div>
+    </div>
+    <div id="bookmarks-view">
+      <div class="card">
+        <h2>保存书签</h2>
       <form id="save-form">
         <label for="save-url">URL</label>
         <input id="save-url" type="url" placeholder="https://example.com" required>
@@ -89,9 +94,35 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="error" id="save-error"></div>
       </form>
     </div>
-    <div class="card">
-      <h2>书签</h2>
-      <div id="bookmark-list"><div class="empty">加载中…</div></div>
+      <div class="card">
+        <h2>书签</h2>
+        <div id="bookmark-list"><div class="empty">加载中…</div></div>
+      </div>
+    </div>
+    <div id="settings-view" class="hidden">
+      <div class="card">
+        <h2>LLM 配置</h2>
+        <form id="llm-form">
+          <label for="llm-provider">Provider</label>
+          <select id="llm-provider">
+            <option value="workers-ai">Workers AI（内置，免费）</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="ollama-cloud">Ollama Cloud</option>
+          </select>
+          <label for="llm-base-url">Base URL</label>
+          <input id="llm-base-url" type="url" placeholder="https://openrouter.ai/api/v1">
+          <label for="llm-api-key">API Key（留空保持不变）</label>
+          <input id="llm-api-key" type="password" autocomplete="off" placeholder="sk-...">
+          <button type="button" id="llm-fetch-models" class="secondary">拉取模型列表</button>
+          <label for="llm-chat-model">对话模型（LLM）</label>
+          <select id="llm-chat-model"><option value="">先拉取模型列表</option></select>
+          <label for="llm-embed-model">向量模型（Embedding，语义搜索）</label>
+          <select id="llm-embed-model"><option value="">先拉取模型列表</option></select>
+          <button type="submit">保存配置</button>
+          <div class="error" id="llm-error"></div>
+          <div class="muted" id="llm-status"></div>
+        </form>
+      </div>
     </div>
   </div>
 </div>
@@ -221,6 +252,100 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     showAuth();
   });
 
+  // ---- 设置 tab ----
+  document.getElementById("tab-bookmarks").addEventListener("click", function () {
+    document.getElementById("tab-bookmarks").classList.add("active");
+    document.getElementById("tab-settings").classList.remove("active");
+    document.getElementById("bookmarks-view").classList.remove("hidden");
+    document.getElementById("settings-view").classList.add("hidden");
+  });
+  document.getElementById("tab-settings").addEventListener("click", function () {
+    document.getElementById("tab-settings").classList.add("active");
+    document.getElementById("tab-bookmarks").classList.remove("active");
+    document.getElementById("settings-view").classList.remove("hidden");
+    document.getElementById("bookmarks-view").classList.add("hidden");
+    loadLlmConfig();
+  });
+
+  function fillModelSelect(sel, models, kind, current) {
+    sel.innerHTML = "";
+    var opts = models.filter(function (m) { return m.kind === kind; });
+    if (!opts.length) {
+      var none = document.createElement("option");
+      none.value = "";
+      none.textContent = "无可用模型";
+      sel.appendChild(none);
+      return;
+    }
+    opts.forEach(function (m) {
+      var o = document.createElement("option");
+      o.value = m.id;
+      o.textContent = m.name + (m.pricing && m.pricing.prompt ? "（$" + (Number(m.pricing.prompt) * 1e6).toFixed(2) + "/M in）" : "");
+      sel.appendChild(o);
+    });
+    if (current) sel.value = current;
+  }
+
+  document.getElementById("llm-fetch-models").addEventListener("click", async function () {
+    var errEl = document.getElementById("llm-error");
+    var statusEl = document.getElementById("llm-status");
+    errEl.textContent = "";
+    statusEl.textContent = "拉取中…";
+    try {
+      var provider = document.getElementById("llm-provider").value;
+      var data = await trpc("llm.listModels", { provider: provider }, "GET");
+      var chat = data.models.filter(function (m) { return m.kind === "chat"; });
+      var emb = data.models.filter(function (m) { return m.kind === "embedding"; });
+      fillModelSelect(document.getElementById("llm-chat-model"), data.models, "chat", null);
+      fillModelSelect(document.getElementById("llm-embed-model"), data.models, "embedding", null);
+      statusEl.textContent = "对话模型 " + chat.length + " 个，向量模型 " + emb.length + " 个";
+    } catch (err) {
+      errEl.textContent = err.message || "拉取失败";
+      statusEl.textContent = "";
+    }
+  });
+
+  document.getElementById("llm-form").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    var errEl = document.getElementById("llm-error");
+    var statusEl = document.getElementById("llm-status");
+    errEl.textContent = "";
+    try {
+      var payload = {
+        provider: document.getElementById("llm-provider").value,
+        baseUrl: document.getElementById("llm-base-url").value.trim() || undefined,
+        model: document.getElementById("llm-chat-model").value || undefined,
+        embeddingModel: document.getElementById("llm-embed-model").value || undefined
+      };
+      var apiKeyVal = document.getElementById("llm-api-key").value;
+      if (apiKeyVal) payload.apiKey = apiKeyVal;
+      await trpc("llm.setConfig", payload);
+      document.getElementById("llm-api-key").value = "";
+      statusEl.textContent = "配置已保存";
+    } catch (err) {
+      errEl.textContent = err.message || "保存失败";
+    }
+  });
+
+  async function loadLlmConfig() {
+    var errEl = document.getElementById("llm-error");
+    try {
+      var cfg = await trpc("llm.getConfig", {}, "GET");
+      document.getElementById("llm-provider").value = cfg.provider;
+      document.getElementById("llm-base-url").value = cfg.baseUrl || "";
+      document.getElementById("llm-status").textContent = cfg.apiKeyConfigured ? "API Key 已配置" : "未配置 API Key";
+      if (cfg.provider === "workers-ai") {
+        fillModelSelect(document.getElementById("llm-chat-model"), [{ id: "@cf/meta/llama-3.1-8b-instruct-fast", name: "Llama 3.1 8B Instruct (Fast)", kind: "chat" }], "chat", cfg.model);
+      } else if (cfg.model) {
+        var data = await trpc("llm.listModels", { provider: cfg.provider }, "GET");
+        fillModelSelect(document.getElementById("llm-chat-model"), data.models, "chat", cfg.model);
+        fillModelSelect(document.getElementById("llm-embed-model"), data.models, "embedding", null);
+      }
+    } catch (err) {
+      errEl.textContent = err.message || "加载配置失败";
+    }
+  }
+
   // ---- 书签 ----
   document.getElementById("save-form").addEventListener("submit", async function (e) {
     e.preventDefault();
@@ -255,14 +380,15 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       bookmarks.forEach(function (bm) {
         var div = document.createElement("div");
         div.className = "bookmark";
-        var title = bm.title || bm.url;
+        var url = (bm.content && bm.content.url) || bm.url || "";
+        var title = bm.title || url || "(无标题)";
         var date = bm.createdAt ? new Date(bm.createdAt).toLocaleString() : "";
         var tags = (bm.tags || []).map(function (t) {
           return '<span class="tag">' + escapeHtml(t.name) + "</span>";
         }).join("");
         div.innerHTML =
           '<div class="title">' + escapeHtml(title) + "</div>" +
-          '<div class="url"><a href="' + escapeHtml(bm.url) + '" target="_blank" rel="noopener">' + escapeHtml(bm.url) + "</a></div>" +
+          (url ? '<div class="url"><a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + escapeHtml(url) + "</a></div>" : "") +
           '<div class="meta">' + escapeHtml(date) + " " + tags + "</div>";
         listEl.appendChild(div);
       });

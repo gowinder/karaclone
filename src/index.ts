@@ -132,7 +132,7 @@ export default {
       await handleDlqBatch(env.DB, batch);
       return;
     }
-    await handleEnrichmentBatch(env.DB, batch);
+    await handleEnrichmentBatch(env.DB, batch, env);
   },
 
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
