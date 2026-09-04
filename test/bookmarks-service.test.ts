@@ -127,4 +127,29 @@ describe("bookmarks service", () => {
       readingProgressPercent: 42,
     });
   });
+
+  it("getBookmarks 返回 bookmark_tags 关联的标签", async () => {
+    await seed();
+    sends.length = 0;
+    const bm = await createBookmark(env.DB, fakeQueue, { userId: USER_ID, url: "https://example.com/tagged", source: "extension", fetchImpl: noFetch,
+    });
+    // 模拟 enrichment 落库：tags + bookmark_tags
+    const now = Date.now();
+    const tagId = "tag_svc_1";
+    await env.DB.prepare("INSERT OR IGNORE INTO tags (id, user_id, name, created_at) VALUES (?, ?, ?, ?)")
+      .bind(tagId, USER_ID, "区块链", now)
+      .run();
+    await env.DB.prepare("INSERT OR IGNORE INTO bookmark_tags (bookmark_id, tag_id, attached_by, attached_at) VALUES (?, ?, 'ai', ?)")
+      .bind(bm.bookmark.id, tagId, now)
+      .run();
+    const list = await getBookmarks(env.DB, USER_ID, { limit: 20, cursor: null, archived: false });
+    const found = list.bookmarks.find((b) => b.id === bm.bookmark.id);
+    expect(found?.tags).toEqual([{ id: tagId, name: "区块链", attachedBy: "ai" }]);
+    // 无标签书签返回空数组
+    const untagged = await createBookmark(env.DB, fakeQueue, { userId: USER_ID, url: "https://example.com/untagged", source: "extension", fetchImpl: noFetch,
+    });
+    const list2 = await getBookmarks(env.DB, USER_ID, { limit: 20, cursor: null, archived: false });
+    const found2 = list2.bookmarks.find((b) => b.id === untagged.bookmark.id);
+    expect(found2?.tags).toEqual([]);
+  });
 });

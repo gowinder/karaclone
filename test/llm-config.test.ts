@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createContext } from "../src/trpc/context";
 import { appRouter } from "../src/trpc/router";
 import { encryptSecret, decryptSecret } from "../src/auth/secret-box";
@@ -129,6 +129,71 @@ describe("llm.getConfigs / setProviderConfig / setSelection", () => {
     const key = await signupAndKey("llm-list2@test.com");
     const c = await caller(key);
     await expect(c.llm.listModels({ provider: "openrouter" })).rejects.toThrow("API key not configured");
+  });
+
+  it("testProvider 未配置 key → ok:false", async () => {
+    const key = await signupAndKey("llm-test1@test.com");
+    const c = await caller(key);
+    const r = await c.llm.testProvider({ provider: "openrouter" });
+    expect(r.ok).toBe(false);
+    expect(r.message).toContain("尚未配置");
+  });
+
+  it("testProvider openrouter 成功 → ok:true", async () => {
+    const key = await signupAndKey("llm-test2@test.com");
+    const c = await caller(key);
+    await c.llm.setProviderConfig({ provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1", apiKey: "sk-or-v1-real" });
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", async (url: string | URL | Request, init?: RequestInit) => {
+      expect(String(url)).toBe("https://openrouter.ai/api/v1/chat/completions");
+      expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer sk-or-v1-real");
+      return new Response(JSON.stringify({ choices: [{ message: { content: "pong" } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    try {
+      const r = await c.llm.testProvider({ provider: "openrouter" });
+      expect(r.ok).toBe(true);
+      expect(r.latencyMs).toBeGreaterThanOrEqual(0);
+    } finally {
+      vi.stubGlobal("fetch", originalFetch);
+    }
+  });
+
+  it("testProvider ollama-cloud 走 /v1/chat/completions", async () => {
+    const key = await signupAndKey("llm-test3@test.com");
+    const c = await caller(key);
+    await c.llm.setProviderConfig({ provider: "ollama-cloud", baseUrl: "https://ollama.com", apiKey: "ollama-key" });
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", async (url: string | URL | Request, init?: RequestInit) => {
+      expect(String(url)).toBe("https://ollama.com/v1/chat/completions");
+      return new Response(JSON.stringify({ choices: [{ message: { content: "pong" } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    try {
+      const r = await c.llm.testProvider({ provider: "ollama-cloud" });
+      expect(r.ok).toBe(true);
+    } finally {
+      vi.stubGlobal("fetch", originalFetch);
+    }
+  });
+
+  it("testProvider 401 → ok:false + 错误信息", async () => {
+    const key = await signupAndKey("llm-test4@test.com");
+    const c = await caller(key);
+    await c.llm.setProviderConfig({ provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1", apiKey: "sk-or-bad" });
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", async () => new Response("Unauthorized", { status: 401 }));
+    try {
+      const r = await c.llm.testProvider({ provider: "openrouter" });
+      expect(r.ok).toBe(false);
+      expect(r.message).toContain("401");
+    } finally {
+      vi.stubGlobal("fetch", originalFetch);
+    }
   });
 });
 

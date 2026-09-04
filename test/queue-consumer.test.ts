@@ -178,6 +178,47 @@ describe("queue consumer 重试与状态迁移", () => {
     expect(tags.results.map((r) => r.name).sort()).toEqual(["ai", "读书"]);
   });
 
+  it("普通 job + ollama-cloud → 请求 /v1/chat/completions 并打标签", async () => {
+    await seedAdmin();
+    const jobId = "job_ollama";
+    const bookmarkId = "bm_ollama";
+    await seedProbeJob(jobId, bookmarkId, 0);
+    const encKey = await encryptSecret("ollama-key", "test-key");
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO user_llm_config (user_id, provider, base_url, api_key_enc, updated_at) VALUES (?, 'ollama-cloud', 'https://ollama.com', ?, ?)",
+    )
+      .bind(ADMIN_USER_ID, encKey, Date.now())
+      .run();
+    // 测试间共享 D1：先清掉该用户已有 selection（前面 openrouter 测试写入的）
+    await env.DB.prepare("DELETE FROM user_llm_selection WHERE user_id = ?").bind(ADMIN_USER_ID).run();
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO user_llm_selection (user_id, chat_provider, chat_model, embedding_provider, embedding_model, updated_at) VALUES (?, 'ollama-cloud', 'gpt-oss:120b', NULL, NULL, ?)",
+    )
+      .bind(ADMIN_USER_ID, Date.now())
+      .run();
+    let capturedUrl = "";
+    const fakeFetch = async (url: string | URL | Request) => {
+      capturedUrl = String(url);
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: JSON.stringify({ tags: ["ollama", "测试"], description: "摘要" }) } }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+    const batch = createMessageBatch("karaclone-phase0-enrichment", [makeMessage(jobId, bookmarkId, 1)]);
+    await handleEnrichmentBatch(env.DB, batch, { ...env, LLM_CONFIG_KEY: "test-key" } as unknown as Env, { fetchImpl: fakeFetch });
+    expect(capturedUrl).toBe("https://ollama.com/v1/chat/completions");
+    const bm = await env.DB.prepare("SELECT tagging_status FROM bookmarks WHERE id = ?").bind(bookmarkId).first<{ tagging_status: string }>();
+    expect(bm?.tagging_status).toBe("success");
+    const tags = await env.DB.prepare(
+      "SELECT t.name FROM bookmark_tags bt JOIN tags t ON t.id = bt.tag_id WHERE bt.bookmark_id = ?",
+    )
+      .bind(bookmarkId)
+      .all<{ name: string }>();
+    expect(tags.results.map((r) => r.name).sort()).toEqual(["ollama", "测试"]);
+  });
+
   it("普通 job + LLM 失败 → tagging failure 但 job success", async () => {
     await seedAdmin();
     const jobId = "job_llm_fail";

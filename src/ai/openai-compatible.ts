@@ -1,17 +1,21 @@
 // OpenAI 兼容 chat completions 调用（OpenRouter / Ollama Cloud 统一抽象）。
-// 两者都是 POST {baseUrl}/chat/completions + Bearer key + {model, messages}。
+// 两者都是 POST {baseUrl}/{endpoint} + Bearer key + {model, messages}。
+// OpenRouter 端点是 /chat/completions；Ollama Cloud 是 /v1/chat/completions。
 
 export type OpenAiCompatibleRequest = {
   baseUrl: string;
   apiKey: string;
   model: string;
   messages: { role: "system" | "user" | "assistant"; content: string }[];
+  /** 相对端点，默认 chat/completions；Ollama Cloud 传 v1/chat/completions */
+  endpoint?: string;
   fetchImpl?: typeof fetch;
 };
 
 export async function runOpenAiCompatible(req: OpenAiCompatibleRequest): Promise<string> {
   const fetchImpl = req.fetchImpl ?? fetch;
-  const url = `${req.baseUrl.replace(/\/$/, "")}/chat/completions`;
+  const endpoint = req.endpoint ?? "chat/completions";
+  const url = `${req.baseUrl.replace(/\/$/, "")}/${endpoint}`;
   const res = await fetchImpl(url, {
     method: "POST",
     headers: {

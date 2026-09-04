@@ -2,6 +2,7 @@ import { z } from "zod";
 import { protectedProcedure, router } from "../base.js";
 import { encryptSecret, decryptSecret } from "../../auth/secret-box.js";
 import { listProviderModels } from "../../ai/model-list.js";
+import { runOpenAiCompatible } from "../../ai/openai-compatible.js";
 
 const DEFAULT_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
 
@@ -138,5 +139,47 @@ export const llmRouter = router({
       const baseUrl = row.base_url ?? (input.provider === "openrouter" ? "https://openrouter.ai/api/v1" : "https://ollama.com");
       const models = await listProviderModels(input.provider, baseUrl, apiKey);
       return { models };
+    }),
+
+  testProvider: protectedProcedure
+    .input(z.object({ provider: zProviderSchema }))
+    .output(
+      z.object({
+        ok: z.boolean(),
+        message: z.string(),
+        latencyMs: z.number().nullable(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      if (input.provider === "workers-ai") {
+        return { ok: true, message: "Workers AI 为 Cloudflare 内置绑定，无需测试", latencyMs: null };
+      }
+      const row = await ctx.env.DB.prepare("SELECT base_url, api_key_enc FROM user_llm_config WHERE user_id = ? AND provider = ?")
+        .bind(ctx.user.id, input.provider)
+        .first<{ base_url: string | null; api_key_enc: string | null }>();
+      if (!row?.api_key_enc) {
+        return { ok: false, message: "尚未配置 API Key", latencyMs: null };
+      }
+      const secret = ctx.env.LLM_CONFIG_KEY;
+      if (!secret) {
+        return { ok: false, message: "服务端 LLM_CONFIG_KEY 未配置", latencyMs: null };
+      }
+      const apiKey = await decryptSecret(row.api_key_enc, secret);
+      const baseUrl = row.base_url ?? (input.provider === "openrouter" ? "https://openrouter.ai/api/v1" : "https://ollama.com");
+      const started = Date.now();
+      try {
+        // 最小调用：发一条 ping 消息，验证 URL 可达 + key 有效
+        await runOpenAiCompatible({
+          baseUrl,
+          apiKey,
+          model: "gpt-oss:120b",
+          messages: [{ role: "user", content: "ping" }],
+          endpoint: input.provider === "ollama-cloud" ? "v1/chat/completions" : "chat/completions",
+        });
+        return { ok: true, message: "连接成功，API Key 有效", latencyMs: Date.now() - started };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { ok: false, message: msg.slice(0, 300), latencyMs: Date.now() - started };
+      }
     }),
 });

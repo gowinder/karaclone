@@ -24,6 +24,7 @@ export interface ServiceBookmark {
   source: "api" | "web" | "cli" | "mobile" | "extension" | "singlefile" | "rss" | "import" | null;
   crawlStatus: "pending" | "success" | "failure" | null;
   taggingStatus: "pending" | "success" | "failure" | null;
+  tags: { id: string; name: string; attachedBy: "ai" | "human" }[];
   createdAt: Date;
   modifiedAt: Date | null;
 }
@@ -80,6 +81,7 @@ function mapRow(row: BookmarkDbRow): ServiceBookmark {
     source: row.source as "api" | "web" | "cli" | "mobile" | "extension" | "singlefile" | "rss" | "import" | null,
     crawlStatus: row.crawl_status as "pending" | "success" | "failure" | null,
     taggingStatus: row.tagging_status as "pending" | "success" | "failure" | null,
+    tags: [],
     createdAt: new Date(row.created_at),
     modifiedAt: row.modified_at === null ? null : new Date(row.modified_at),
     description: row.description ?? null,
@@ -176,8 +178,33 @@ export async function getBookmarks(
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
   const last = page.at(-1);
+
+  // 批量查本页书签的标签（bookmark_tags join tags）
+  const bookmarks = page.map(mapRow);
+  if (bookmarks.length > 0) {
+    const placeholders = bookmarks.map(() => "?").join(",");
+    const tagRows = await db
+      .prepare(
+        `SELECT bt.bookmark_id, t.id, t.name, bt.attached_by
+         FROM bookmark_tags bt JOIN tags t ON t.id = bt.tag_id
+         WHERE bt.bookmark_id IN (${placeholders})
+         ORDER BY bt.attached_at ASC, t.name ASC`,
+      )
+      .bind(...bookmarks.map((b) => b.id))
+      .all<{ bookmark_id: string; id: string; name: string; attached_by: string }>();
+    const byBookmark = new Map<string, ServiceBookmark["tags"]>();
+    for (const r of tagRows.results ?? []) {
+      const list = byBookmark.get(r.bookmark_id) ?? [];
+      list.push({ id: r.id, name: r.name, attachedBy: r.attached_by as "ai" | "human" });
+      byBookmark.set(r.bookmark_id, list);
+    }
+    for (const b of bookmarks) {
+      b.tags = byBookmark.get(b.id) ?? [];
+    }
+  }
+
   return {
-    bookmarks: page.map(mapRow),
+    bookmarks,
     nextCursor: hasMore && last ? { createdAt: new Date(last.created_at), id: last.id } : null,
   };
 }

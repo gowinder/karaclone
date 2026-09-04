@@ -31,7 +31,7 @@ function toContractBookmark(bm: ServiceBookmark): z.infer<typeof zBookmarkSchema
     summary: bm.summary,
     source: bm.source,
     userId: bm.userId,
-    tags: [],
+    tags: bm.tags,
     assets: [],
     content: {
       type: "link" as const,
@@ -139,11 +139,25 @@ export const bookmarksRouter = router({
         source: row.source as "api" | "web" | "cli" | "mobile" | "extension" | "singlefile" | "rss" | "import" | null,
         crawlStatus: row.crawl_status as "pending" | "success" | "failure" | null,
         taggingStatus: row.tagging_status as "pending" | "success" | "failure" | null,
+        tags: [],
         createdAt: new Date(row.created_at),
         modifiedAt: row.modified_at === null ? null : new Date(row.modified_at),
         description: null,
         favicon: null,
       };
+      const tagRows = await ctx.env.DB.prepare(
+        `SELECT t.id, t.name, bt.attached_by
+         FROM bookmark_tags bt JOIN tags t ON t.id = bt.tag_id
+         WHERE bt.bookmark_id = ?
+         ORDER BY bt.attached_at ASC, t.name ASC`,
+      )
+        .bind(input.bookmarkId)
+        .all<{ id: string; name: string; attached_by: string }>();
+      bm.tags = (tagRows.results ?? []).map((r) => ({
+        id: r.id,
+        name: r.name,
+        attachedBy: r.attached_by as "ai" | "human",
+      }));
       const contract = toContractBookmark(bm);
       if (input.includeContent && contract.content.type === "link") {
         contract.content.htmlContent = renderReaderHtml({

@@ -70,6 +70,8 @@ async function enrichBookmark(
     const apiKey = await decryptSecret(cfg.api_key_enc, env.LLM_CONFIG_KEY);
     const baseUrl =
       cfg.base_url ?? (sel.chat_provider === "openrouter" ? "https://openrouter.ai/api/v1" : "https://ollama.com");
+    // Ollama Cloud 的 OpenAI 兼容端点是 /v1/chat/completions（裸 /chat/completions 404）
+    const endpoint = sel.chat_provider === "ollama-cloud" ? "v1/chat/completions" : "chat/completions";
     raw = await runOpenAiCompatible({
       baseUrl,
       apiKey,
@@ -78,6 +80,7 @@ async function enrichBookmark(
         { role: "system", content: systemPrompt },
         { role: "user", content: `${title}\n${description}` },
       ],
+      endpoint,
       fetchImpl,
     });
   }

@@ -61,6 +61,15 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .provider-card .edit-form .save-row { display:flex; gap:8px; align-items:center; margin-top:10px; }
   .provider-card .edit-form .save-row button { margin-top:0; }
   .provider-card .edit-form .save-row .save-status { font-size:12px; color:var(--muted); }
+  .provider-card .edit-form .test-row { display:flex; gap:8px; align-items:center; margin-top:8px; }
+  .provider-card .edit-form .test-row button { margin-top:0; }
+  .provider-card .edit-form .test-row .test-status { font-size:12px; }
+  .provider-card .edit-form .test-row .test-status.ok { color:#15803d; }
+  .provider-card .edit-form .test-row .test-status.no { color:var(--danger); }
+  .status-badge { display:inline-block; border-radius:999px; padding:2px 10px; font-size:12px; margin-left:8px; vertical-align:middle; }
+  .status-badge.pending { background:#fef3c7; color:#92400e; }
+  .status-badge.success { background:#dcfce7; color:#166534; }
+  .status-badge.failure { background:#fee2e2; color:#991b1b; }
 </style>
 </head>
 <body>
@@ -330,6 +339,10 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
               '<button type="button" data-act="save">保存</button>' +
               '<span class="save-status"></span>' +
             "</div>" +
+            '<div class="test-row">' +
+              '<button type="button" class="secondary" data-act="test">测试连接</button>' +
+              '<span class="test-status"></span>' +
+            "</div>" +
             '<div class="err"></div>' +
           "</div>" +
         "</div>";
@@ -344,7 +357,24 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       });
       card.querySelector('[data-act="fetch"]').addEventListener("click", function () { fetchModels(card, p); });
       card.querySelector('[data-act="save"]').addEventListener("click", function () { saveProvider(card, p); });
+      card.querySelector('[data-act="test"]').addEventListener("click", function () { testProvider(card, p); });
     });
+  }
+
+  async function testProvider(card, provider) {
+    var errEl = card.querySelector(".err");
+    var statusEl = card.querySelector(".test-status");
+    errEl.textContent = "";
+    statusEl.textContent = "测试中…";
+    statusEl.className = "test-status";
+    try {
+      var data = await trpc("llm.testProvider", { provider: provider });
+      statusEl.textContent = data.message + (data.latencyMs != null ? "（" + data.latencyMs + "ms）" : "");
+      statusEl.className = "test-status " + (data.ok ? "ok" : "no");
+    } catch (err) {
+      statusEl.textContent = err.message || "测试失败";
+      statusEl.className = "test-status no";
+    }
   }
 
   async function fetchModels(card, provider) {
@@ -548,6 +578,21 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       document.getElementById("save-url").value = "";
       document.getElementById("save-title").value = "";
       await loadBookmarks();
+      // 轮询等待标签生成（最多 60s，每 3s 一次），完成后自动刷新列表
+      var attempts = 0;
+      var timer = setInterval(async function () {
+        attempts++;
+        try {
+          var data = await trpc("bookmarks.getBookmarks", { limit: 50, archived: false }, "GET");
+          var pending = (data.bookmarks || []).some(function (b) { return b.taggingStatus === "pending"; });
+          if (!pending || attempts >= 20) {
+            clearInterval(timer);
+            await loadBookmarks();
+          }
+        } catch (err) {
+          clearInterval(timer);
+        }
+      }, 3000);
     } catch (err) {
       errEl.textContent = err.message || "保存失败";
     }
@@ -573,8 +618,16 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         var tags = (bm.tags || []).map(function (t) {
           return '<span class="tag">' + escapeHtml(t.name) + "</span>";
         }).join("");
+        var badge = "";
+        if (bm.taggingStatus === "pending") {
+          badge = '<span class="status-badge pending">生成中…</span>';
+        } else if (bm.taggingStatus === "failure") {
+          badge = '<span class="status-badge failure">生成失败</span>';
+        } else if (bm.taggingStatus === "success") {
+          badge = '<span class="status-badge success">已生成</span>';
+        }
         div.innerHTML =
-          '<div class="title">' + escapeHtml(title) + "</div>" +
+          '<div class="title">' + escapeHtml(title) + badge + "</div>" +
           (url ? '<div class="url"><a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + escapeHtml(url) + "</a></div>" : "") +
           '<div class="meta">' + escapeHtml(date) + " " + tags + "</div>";
         listEl.appendChild(div);
