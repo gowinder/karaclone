@@ -30,11 +30,15 @@ async function enrichBookmark(
     .first<{ user_id: string; title: string | null; description: string | null }>();
   if (!bm) return;
 
-  const cfg = await db
-    .prepare("SELECT provider, base_url, api_key_enc, model FROM user_llm_config WHERE user_id = ?")
+  const sel = await db
+    .prepare("SELECT chat_provider, chat_model FROM user_llm_selection WHERE user_id = ?")
     .bind(bm.user_id)
-    .first<{ provider: string; base_url: string | null; api_key_enc: string | null; model: string | null }>();
-  if (!cfg?.model) return; // 未配置 LLM → 跳过
+    .first<{ chat_provider: string; chat_model: string }>();
+  if (!sel?.chat_model) return; // 未配置 LLM → 跳过
+  const cfg = await db
+    .prepare("SELECT base_url, api_key_enc FROM user_llm_config WHERE user_id = ? AND provider = ?")
+    .bind(bm.user_id, sel.chat_provider)
+    .first<{ base_url: string | null; api_key_enc: string | null }>();
 
   const title = bm.title ?? "";
   const description = bm.description ?? "";
@@ -42,8 +46,8 @@ async function enrichBookmark(
     'Return 1-8 concise Chinese bookmark tags and a description or null. Respond with pure JSON: {"tags": [...], "description": ...}';
 
   let raw: unknown;
-  if (cfg.provider === "workers-ai") {
-    raw = await env.AI.run(cfg.model, {
+  if (sel.chat_provider === "workers-ai") {
+    raw = await env.AI.run(sel.chat_model, {
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: `${title}\n${description}` },
@@ -62,14 +66,14 @@ async function enrichBookmark(
       },
     });
   } else {
-    if (!cfg.api_key_enc || !env.LLM_CONFIG_KEY) return;
+    if (!cfg?.api_key_enc || !env.LLM_CONFIG_KEY) return;
     const apiKey = await decryptSecret(cfg.api_key_enc, env.LLM_CONFIG_KEY);
     const baseUrl =
-      cfg.base_url ?? (cfg.provider === "openrouter" ? "https://openrouter.ai/api/v1" : "https://ollama.com");
+      cfg.base_url ?? (sel.chat_provider === "openrouter" ? "https://openrouter.ai/api/v1" : "https://ollama.com");
     raw = await runOpenAiCompatible({
       baseUrl,
       apiKey,
-      model: cfg.model,
+      model: sel.chat_model,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: `${title}\n${description}` },

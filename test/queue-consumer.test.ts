@@ -143,12 +143,17 @@ describe("queue consumer 重试与状态迁移", () => {
     const jobId = "job_llm";
     const bookmarkId = "bm_llm";
     await seedProbeJob(jobId, bookmarkId, 0);
-    // 配置 openrouter LLM（真实加密 key）
+    // 配置 openrouter LLM（真实加密 key）+ 选择
     const encKey = await encryptSecret("sk-or-test", "test-key");
     await env.DB.prepare(
-      "INSERT OR IGNORE INTO user_llm_config (user_id, provider, base_url, api_key_enc, model, updated_at) VALUES (?, 'openrouter', 'https://openrouter.ai/api/v1', ?, 'anthropic/claude-3.5-sonnet', ?)",
+      "INSERT OR IGNORE INTO user_llm_config (user_id, provider, base_url, api_key_enc, updated_at) VALUES (?, 'openrouter', 'https://openrouter.ai/api/v1', ?, ?)",
     )
       .bind(ADMIN_USER_ID, encKey, Date.now())
+      .run();
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO user_llm_selection (user_id, chat_provider, chat_model, embedding_provider, embedding_model, updated_at) VALUES (?, 'openrouter', 'anthropic/claude-3.5-sonnet', NULL, NULL, ?)",
+    )
+      .bind(ADMIN_USER_ID, Date.now())
       .run();
     // 注入 fake fetch 返回 OpenAI 格式
     const fakeFetch = async () =>
@@ -180,9 +185,14 @@ describe("queue consumer 重试与状态迁移", () => {
     await seedProbeJob(jobId, bookmarkId, 0);
     const encKey = await encryptSecret("sk-or-test", "test-key");
     await env.DB.prepare(
-      "INSERT OR IGNORE INTO user_llm_config (user_id, provider, base_url, api_key_enc, model, updated_at) VALUES (?, 'openrouter', 'https://openrouter.ai/api/v1', ?, 'anthropic/claude-3.5-sonnet', ?)",
+      "INSERT OR IGNORE INTO user_llm_config (user_id, provider, base_url, api_key_enc, updated_at) VALUES (?, 'openrouter', 'https://openrouter.ai/api/v1', ?, ?)",
     )
       .bind(ADMIN_USER_ID, encKey, Date.now())
+      .run();
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO user_llm_selection (user_id, chat_provider, chat_model, embedding_provider, embedding_model, updated_at) VALUES (?, 'openrouter', 'anthropic/claude-3.5-sonnet', NULL, NULL, ?)",
+    )
+      .bind(ADMIN_USER_ID, Date.now())
       .run();
     const fakeFetch = async () => new Response("bad gateway", { status: 502 });
     const batch = createMessageBatch("karaclone-phase0-enrichment", [makeMessage(jobId, bookmarkId, 1)]);

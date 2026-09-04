@@ -34,62 +34,101 @@ describe("secret-box AES-GCM 加密", () => {
   });
 });
 
-describe("llm.getConfig / llm.setConfig", () => {
-  it("默认返回 workers-ai", async () => {
+describe("llm.getConfigs / setProviderConfig / setSelection", () => {
+  it("默认无 provider 配置，selection 回退 workers-ai", async () => {
     const key = await signupAndKey("llm-default@test.com");
     const c = await caller(key);
-    const cfg = await c.llm.getConfig();
-    expect(cfg).toMatchObject({ provider: "workers-ai", model: "@cf/meta/llama-3.1-8b-instruct-fast" });
-    expect(cfg.apiKeyConfigured).toBe(false);
+    const cfg = await c.llm.getConfigs();
+    expect(cfg.providers).toEqual([]);
+    expect(cfg.selection).toMatchObject({
+      chatProvider: "workers-ai",
+      chatModel: "@cf/meta/llama-3.1-8b-instruct-fast",
+      embeddingProvider: null,
+      embeddingModel: null,
+    });
   });
 
-  it("设置 openrouter 后读取回显（key 不泄露）", async () => {
-    const key = await signupAndKey("llm-openrouter@test.com");
+  it("配置两个 provider 各自独立（key 不泄露）", async () => {
+    const key = await signupAndKey("llm-multi@test.com");
     const c = await caller(key);
-    await c.llm.setConfig({
+    await c.llm.setProviderConfig({
       provider: "openrouter",
       baseUrl: "https://openrouter.ai/api/v1",
       apiKey: "sk-or-v1-test-secret",
-      model: "anthropic/claude-3.5-sonnet",
-      embeddingModel: "text-embedding-3-small",
     });
-    const cfg = await c.llm.getConfig();
-    expect(cfg).toMatchObject({
-      provider: "openrouter",
-      baseUrl: "https://openrouter.ai/api/v1",
-      model: "anthropic/claude-3.5-sonnet",
-      embeddingModel: "text-embedding-3-small",
-      apiKeyConfigured: true,
+    await c.llm.setProviderConfig({
+      provider: "ollama-cloud",
+      baseUrl: "https://ollama.com",
+      apiKey: "ollama-key-123",
     });
+    const cfg = await c.llm.getConfigs();
+    expect(cfg.providers).toHaveLength(2);
+    const or = cfg.providers.find((p) => p.provider === "openrouter");
+    const oc = cfg.providers.find((p) => p.provider === "ollama-cloud");
+    expect(or).toMatchObject({ baseUrl: "https://openrouter.ai/api/v1", apiKeyConfigured: true });
+    expect(oc).toMatchObject({ baseUrl: "https://ollama.com", apiKeyConfigured: true });
     expect(JSON.stringify(cfg)).not.toContain("sk-or-v1-test-secret");
+    expect(JSON.stringify(cfg)).not.toContain("ollama-key-123");
   });
 
-  it("设置 ollama-cloud", async () => {
-    const key = await signupAndKey("llm-ollama@test.com");
+  it("setSelection 保存 chat + embedding 双模型", async () => {
+    const key = await signupAndKey("llm-sel@test.com");
     const c = await caller(key);
-    await c.llm.setConfig({
-      provider: "ollama-cloud",
-      baseUrl: "https://ollama.com/v1",
-      apiKey: "ollama-key-123",
-      model: "gpt-oss:120b",
+    await c.llm.setSelection({
+      chatProvider: "openrouter",
+      chatModel: "anthropic/claude-3.5-sonnet",
+      embeddingProvider: "openrouter",
+      embeddingModel: "text-embedding-3-small",
     });
-    const cfg = await c.llm.getConfig();
-    expect(cfg).toMatchObject({ provider: "ollama-cloud", model: "gpt-oss:120b" });
+    const cfg = await c.llm.getConfigs();
+    expect(cfg.selection).toMatchObject({
+      chatProvider: "openrouter",
+      chatModel: "anthropic/claude-3.5-sonnet",
+      embeddingProvider: "openrouter",
+      embeddingModel: "text-embedding-3-small",
+    });
+  });
+
+  it("setSelection 可只配 chat 不配 embedding", async () => {
+    const key = await signupAndKey("llm-sel2@test.com");
+    const c = await caller(key);
+    await c.llm.setSelection({ chatProvider: "ollama-cloud", chatModel: "gpt-oss:120b" });
+    const cfg = await c.llm.getConfigs();
+    expect(cfg.selection).toMatchObject({
+      chatProvider: "ollama-cloud",
+      chatModel: "gpt-oss:120b",
+      embeddingProvider: null,
+      embeddingModel: null,
+    });
   });
 
   it("未认证 → UNAUTHORIZED", async () => {
     const c = await caller();
-    await expect(c.llm.getConfig()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(c.llm.getConfigs()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
   it("api_key 落库为密文", async () => {
     const key = await signupAndKey("llm-enc@test.com");
     const c = await caller(key);
-    await c.llm.setConfig({ provider: "ollama-cloud", baseUrl: "https://ollama.com/v1", apiKey: "plain-secret-xyz", model: "m" });
-    const row = await env.DB.prepare("SELECT api_key_enc FROM user_llm_config WHERE user_id = (SELECT id FROM users WHERE email = 'llm-enc@test.com')")
+    await c.llm.setProviderConfig({ provider: "ollama-cloud", baseUrl: "https://ollama.com/v1", apiKey: "plain-secret-xyz" });
+    const row = await env.DB.prepare("SELECT api_key_enc FROM user_llm_config WHERE user_id = (SELECT id FROM users WHERE email = 'llm-enc@test.com') AND provider = 'ollama-cloud'")
       .first<{ api_key_enc: string }>();
     expect(row?.api_key_enc).toMatch(/^v1:/);
     expect(row?.api_key_enc).not.toContain("plain-secret-xyz");
+  });
+
+  it("listModels workers-ai 硬编码单模型", async () => {
+    const key = await signupAndKey("llm-list@test.com");
+    const c = await caller(key);
+    const { models } = await c.llm.listModels({ provider: "workers-ai" });
+    expect(models).toHaveLength(1);
+    expect(models[0]).toMatchObject({ id: "@cf/meta/llama-3.1-8b-instruct-fast", kind: "chat" });
+  });
+
+  it("listModels 未配置 key → 抛错", async () => {
+    const key = await signupAndKey("llm-list2@test.com");
+    const c = await caller(key);
+    await expect(c.llm.listModels({ provider: "openrouter" })).rejects.toThrow("API key not configured");
   });
 });
 

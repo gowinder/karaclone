@@ -37,6 +37,30 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .tab.active { background:var(--accent); color:#fff; border-color:var(--accent); }
   .empty { color:var(--muted); text-align:center; padding:24px 0; font-size:14px; }
   .muted { color:var(--muted); font-size:13px; }
+  .provider-card { border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:12px; }
+  .provider-card .head { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+  .provider-card .name { font-size:15px; font-weight:600; }
+  .provider-card .badge { font-size:12px; color:var(--muted); }
+  .provider-card .badge.ok { color:#15803d; }
+  .provider-card .badge.no { color:var(--danger); }
+  .provider-card .actions { display:flex; gap:8px; }
+  .provider-card .actions button { margin-top:0; padding:6px 12px; font-size:13px; }
+  .provider-card .edit-form { display:none; margin-top:10px; }
+  .provider-card .edit-form.open { display:block; }
+  .provider-card .edit-form .row { margin-bottom:8px; }
+  .provider-card .edit-form .row > div { flex:1; }
+  .provider-card .edit-form .hint { font-size:12px; color:var(--muted); margin-top:4px; }
+  .provider-card .edit-form .err { color:var(--danger); font-size:12px; min-height:16px; margin-top:6px; }
+  .provider-card .edit-form .ok { color:#15803d; font-size:12px; min-height:16px; margin-top:6px; }
+  .provider-card .edit-form .fetch-row { display:flex; gap:8px; align-items:center; }
+  .provider-card .edit-form .fetch-row button { margin-top:0; }
+  .provider-card .edit-form .fetch-row .fetch-status { font-size:12px; color:var(--muted); }
+  .provider-card .edit-form .model-row { display:flex; gap:8px; margin-top:8px; }
+  .provider-card .edit-form .model-row select { flex:1; padding:8px; border:1px solid var(--border); border-radius:8px; font-size:13px; }
+  .provider-card .edit-form .model-row .model-count { font-size:12px; color:var(--muted); align-self:center; white-space:nowrap; }
+  .provider-card .edit-form .save-row { display:flex; gap:8px; align-items:center; margin-top:10px; }
+  .provider-card .edit-form .save-row button { margin-top:0; }
+  .provider-card .edit-form .save-row .save-status { font-size:12px; color:var(--muted); }
 </style>
 </head>
 <body>
@@ -101,27 +125,18 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     </div>
     <div id="settings-view" class="hidden">
       <div class="card">
-        <h2>LLM 配置</h2>
-        <form id="llm-form">
-          <label for="llm-provider">Provider</label>
-          <select id="llm-provider">
-            <option value="workers-ai">Workers AI（内置，免费）</option>
-            <option value="openrouter">OpenRouter</option>
-            <option value="ollama-cloud">Ollama Cloud</option>
-          </select>
-          <label for="llm-base-url">Base URL</label>
-          <input id="llm-base-url" type="url" placeholder="https://openrouter.ai/api/v1">
-          <label for="llm-api-key">API Key（留空保持不变）</label>
-          <input id="llm-api-key" type="password" autocomplete="off" placeholder="sk-...">
-          <button type="button" id="llm-fetch-models" class="secondary">拉取模型列表</button>
-          <label for="llm-chat-model">对话模型（LLM）</label>
-          <select id="llm-chat-model"><option value="">先拉取模型列表</option></select>
-          <label for="llm-embed-model">向量模型（Embedding，语义搜索）</label>
-          <select id="llm-embed-model"><option value="">先拉取模型列表</option></select>
-          <button type="submit">保存配置</button>
-          <div class="error" id="llm-error"></div>
-          <div class="muted" id="llm-status"></div>
-        </form>
+        <h2>AI 提供商</h2>
+        <div id="provider-list"><div class="empty">加载中…</div></div>
+      </div>
+      <div class="card">
+        <h2>模型选择</h2>
+        <label for="chat-model-select">对话模型（LLM，打标签/摘要）</label>
+        <select id="chat-model-select"><option value="">先配置并拉取模型</option></select>
+        <label for="embed-model-select">向量模型（Embedding，语义搜索，可选）</label>
+        <select id="embed-model-select"><option value="">不使用向量模型</option></select>
+        <button type="button" id="save-selection">保存模型选择</button>
+        <div class="error" id="llm-error"></div>
+        <div class="muted" id="llm-status"></div>
       </div>
     </div>
   </div>
@@ -253,6 +268,13 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   });
 
   // ---- 设置 tab ----
+  var PROVIDER_META = {
+    "workers-ai": { name: "Workers AI", desc: "Cloudflare 内置，免费额度", defaultUrl: "" },
+    "openrouter": { name: "OpenRouter", desc: "聚合多家模型，按量付费", defaultUrl: "https://openrouter.ai/api/v1" },
+    "ollama-cloud": { name: "Ollama Cloud", desc: "Ollama 官方云服务", defaultUrl: "https://ollama.com" }
+  };
+  var providerModels = {}; // provider -> { chat: [], embedding: [] }
+
   document.getElementById("tab-bookmarks").addEventListener("click", function () {
     document.getElementById("tab-bookmarks").classList.add("active");
     document.getElementById("tab-settings").classList.remove("active");
@@ -267,107 +289,245 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     loadLlmConfig();
   });
 
-  var DEFAULT_BASE_URLS = {
-    "workers-ai": "",
-    "openrouter": "https://openrouter.ai/api/v1",
-    "ollama-cloud": "https://ollama.com"
-  };
-
-  document.getElementById("llm-provider").addEventListener("change", function () {
-    var urlEl = document.getElementById("llm-base-url");
-    var current = urlEl.value.trim();
-    // 当前值为空或等于任一已知默认值 → 替换为新 provider 默认
-    var isDefault = !current || Object.values(DEFAULT_BASE_URLS).indexOf(current) !== -1;
-    if (isDefault) {
-      urlEl.value = DEFAULT_BASE_URLS[document.getElementById("llm-provider").value] || "";
-    }
-  });
-
-  function fillModelSelect(sel, models, kind, current) {
-    sel.innerHTML = "";
-    var opts = models.filter(function (m) { return m.kind === kind; });
-    if (!opts.length) {
-      var none = document.createElement("option");
-      none.value = "";
-      none.textContent = "无可用模型";
-      sel.appendChild(none);
-      return;
-    }
-    opts.forEach(function (m) {
-      var o = document.createElement("option");
-      o.value = m.id;
-      o.textContent = m.name + (m.pricing && m.pricing.prompt ? "（$" + (Number(m.pricing.prompt) * 1e6).toFixed(2) + "/M in）" : "");
-      sel.appendChild(o);
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
     });
-    if (current) sel.value = current;
   }
 
-  document.getElementById("llm-fetch-models").addEventListener("click", async function () {
-    var errEl = document.getElementById("llm-error");
-    var statusEl = document.getElementById("llm-status");
+  function renderProviderList(providers) {
+    var list = document.getElementById("provider-list");
+    var html = "";
+    Object.keys(PROVIDER_META).forEach(function (p) {
+      var meta = PROVIDER_META[p];
+      var cfg = providers.find(function (x) { return x.provider === p; });
+      var badge = cfg
+        ? '<span class="badge ok">已配置' + (cfg.apiKeyConfigured ? " · Key 已存" : "") + "</span>"
+        : '<span class="badge no">未配置</span>';
+      html +=
+        '<div class="provider-card" data-provider="' + p + '">' +
+          '<div class="head">' +
+            '<div><div class="name">' + meta.name + "</div><div class='badge'>" + meta.desc + "</div></div>" +
+            '<div class="actions">' + badge +
+              '<button type="button" class="secondary" data-act="edit">' + (cfg ? "编辑" : "配置") + "</button>" +
+            "</div>" +
+          "</div>" +
+          '<div class="edit-form">' +
+            '<div class="row">' +
+              '<div><label>Base URL</label><input type="url" data-f="url" placeholder="' + meta.defaultUrl + '"></div>' +
+              '<div><label>API Key（留空保持不变）</label><input type="password" data-f="key" autocomplete="off" placeholder="sk-..."></div>' +
+            "</div>" +
+            '<div class="fetch-row">' +
+              '<button type="button" class="secondary" data-act="fetch">拉取模型列表</button>' +
+              '<span class="fetch-status"></span>' +
+            "</div>" +
+            '<div class="model-row">' +
+              '<select data-f="chat"><option value="">对话模型</option></select>' +
+              '<select data-f="embed"><option value="">向量模型</option></select>' +
+              '<span class="model-count"></span>' +
+            "</div>" +
+            '<div class="save-row">' +
+              '<button type="button" data-act="save">保存</button>' +
+              '<span class="save-status"></span>' +
+            "</div>" +
+            '<div class="err"></div>' +
+          "</div>" +
+        "</div>";
+    });
+    list.innerHTML = html;
+    list.querySelectorAll(".provider-card").forEach(function (card) {
+      var p = card.dataset.provider;
+      var cfg = providers.find(function (x) { return x.provider === p; });
+      if (cfg && cfg.baseUrl) card.querySelector('[data-f="url"]').value = cfg.baseUrl;
+      card.querySelector('[data-act="edit"]').addEventListener("click", function () {
+        card.querySelector(".edit-form").classList.toggle("open");
+      });
+      card.querySelector('[data-act="fetch"]').addEventListener("click", function () { fetchModels(card, p); });
+      card.querySelector('[data-act="save"]').addEventListener("click", function () { saveProvider(card, p); });
+    });
+  }
+
+  async function fetchModels(card, provider) {
+    var errEl = card.querySelector(".err");
+    var statusEl = card.querySelector(".fetch-status");
     errEl.textContent = "";
     statusEl.textContent = "拉取中…";
     try {
-      var provider = document.getElementById("llm-provider").value;
-      // 先保存当前表单（含新填的 API key），再拉取模型列表
-      var savePayload = {
-        provider: provider,
-        baseUrl: document.getElementById("llm-base-url").value.trim() || undefined,
-        model: document.getElementById("llm-chat-model").value || undefined,
-        embeddingModel: document.getElementById("llm-embed-model").value || undefined
-      };
-      var apiKeyVal = document.getElementById("llm-api-key").value;
-      if (apiKeyVal) savePayload.apiKey = apiKeyVal;
-      await trpc("llm.setConfig", savePayload);
-      document.getElementById("llm-api-key").value = "";
+      // 先保存当前表单（含新填的 key），再拉取
+      var url = card.querySelector('[data-f="url"]').value.trim() || undefined;
+      var key = card.querySelector('[data-f="key"]').value;
+      var payload = { provider: provider };
+      if (url) payload.baseUrl = url;
+      if (key) payload.apiKey = key;
+      await trpc("llm.setProviderConfig", payload);
+      card.querySelector('[data-f="key"]').value = "";
       var data = await trpc("llm.listModels", { provider: provider }, "GET");
-      var chat = data.models.filter(function (m) { return m.kind === "chat"; });
-      var emb = data.models.filter(function (m) { return m.kind === "embedding"; });
-      fillModelSelect(document.getElementById("llm-chat-model"), data.models, "chat", null);
-      fillModelSelect(document.getElementById("llm-embed-model"), data.models, "embedding", null);
-      statusEl.textContent = "对话模型 " + chat.length + " 个，向量模型 " + emb.length + " 个";
+      providerModels[provider] = {
+        chat: data.models.filter(function (m) { return m.kind === "chat"; }),
+        embedding: data.models.filter(function (m) { return m.kind === "embedding"; })
+      };
+      fillCardModels(card, provider);
+      statusEl.textContent = "对话 " + providerModels[provider].chat.length + " 个，向量 " + providerModels[provider].embedding.length + " 个";
     } catch (err) {
       errEl.textContent = err.message || "拉取失败";
       statusEl.textContent = "";
     }
-  });
+  }
 
-  document.getElementById("llm-form").addEventListener("submit", async function (e) {
-    e.preventDefault();
+  function fillCardModels(card, provider) {
+    var m = providerModels[provider];
+    if (!m) return;
+    var chatSel = card.querySelector('[data-f="chat"]');
+    var embedSel = card.querySelector('[data-f="embed"]');
+    chatSel.innerHTML = "";
+    embedSel.innerHTML = "";
+    if (m.chat.length) {
+      m.chat.forEach(function (x) {
+        var o = document.createElement("option");
+        o.value = x.id;
+        o.textContent = x.name;
+        chatSel.appendChild(o);
+      });
+    } else {
+      var none = document.createElement("option");
+      none.value = "";
+      none.textContent = "无对话模型";
+      chatSel.appendChild(none);
+    }
+    if (m.embedding.length) {
+      m.embedding.forEach(function (x) {
+        var o = document.createElement("option");
+        o.value = x.id;
+        o.textContent = x.name;
+        embedSel.appendChild(o);
+      });
+    } else {
+      var none2 = document.createElement("option");
+      none2.value = "";
+      none2.textContent = "无向量模型";
+      embedSel.appendChild(none2);
+    }
+  }
+
+  async function saveProvider(card, provider) {
+    var errEl = card.querySelector(".err");
+    var statusEl = card.querySelector(".save-status");
+    errEl.textContent = "";
+    try {
+      var url = card.querySelector('[data-f="url"]').value.trim() || undefined;
+      var key = card.querySelector('[data-f="key"]').value;
+      var payload = { provider: provider };
+      if (url) payload.baseUrl = url;
+      if (key) payload.apiKey = key;
+      await trpc("llm.setProviderConfig", payload);
+      card.querySelector('[data-f="key"]').value = "";
+      statusEl.textContent = "已保存";
+      loadLlmConfig();
+    } catch (err) {
+      errEl.textContent = err.message || "保存失败";
+    }
+  }
+
+  function fillSelectionSelects(selection) {
+    var chatSel = document.getElementById("chat-model-select");
+    var embedSel = document.getElementById("embed-model-select");
+    chatSel.innerHTML = "";
+    embedSel.innerHTML = "";
+    // 对话模型：聚合所有已拉取 provider 的 chat 模型
+    var chatOpts = [];
+    Object.keys(providerModels).forEach(function (p) {
+      providerModels[p].chat.forEach(function (x) {
+        chatOpts.push({ provider: p, id: x.id, name: x.name });
+      });
+    });
+    if (chatOpts.length) {
+      chatOpts.forEach(function (x) {
+        var o = document.createElement("option");
+        o.value = x.provider + "::" + x.id;
+        o.textContent = "[" + (PROVIDER_META[x.provider] || {}).name + "] " + x.name;
+        chatSel.appendChild(o);
+      });
+      var cur = selection.chatProvider + "::" + selection.chatModel;
+      if (chatOpts.some(function (x) { return x.provider + "::" + x.id === cur; })) {
+        chatSel.value = cur;
+      }
+    } else {
+      var none = document.createElement("option");
+      none.value = "";
+      none.textContent = "先在上方配置 provider 并拉取模型";
+      chatSel.appendChild(none);
+    }
+    // 向量模型：聚合所有已拉取 provider 的 embedding 模型
+    var embOpts = [];
+    Object.keys(providerModels).forEach(function (p) {
+      providerModels[p].embedding.forEach(function (x) {
+        embOpts.push({ provider: p, id: x.id, name: x.name });
+      });
+    });
+    var noneOpt = document.createElement("option");
+    noneOpt.value = "";
+    noneOpt.textContent = "不使用向量模型";
+    embedSel.appendChild(noneOpt);
+    embOpts.forEach(function (x) {
+      var o = document.createElement("option");
+      o.value = x.provider + "::" + x.id;
+      o.textContent = "[" + (PROVIDER_META[x.provider] || {}).name + "] " + x.name;
+      embedSel.appendChild(o);
+    });
+    if (selection.embeddingProvider && selection.embeddingModel) {
+      var cur = selection.embeddingProvider + "::" + selection.embeddingModel;
+      if (embOpts.some(function (x) { return x.provider + "::" + x.id === cur; })) {
+        embedSel.value = cur;
+      }
+    }
+  }
+
+  document.getElementById("save-selection").addEventListener("click", async function () {
     var errEl = document.getElementById("llm-error");
     var statusEl = document.getElementById("llm-status");
     errEl.textContent = "";
     try {
+      var chatSel = document.getElementById("chat-model-select");
+      var embedSel = document.getElementById("embed-model-select");
+      if (!chatSel.value) throw new Error("请先选择对话模型");
+      var chatParts = chatSel.value.split("::");
       var payload = {
-        provider: document.getElementById("llm-provider").value,
-        baseUrl: document.getElementById("llm-base-url").value.trim() || undefined,
-        model: document.getElementById("llm-chat-model").value || undefined,
-        embeddingModel: document.getElementById("llm-embed-model").value || undefined
+        chatProvider: chatParts[0],
+        chatModel: chatParts[1]
       };
-      var apiKeyVal = document.getElementById("llm-api-key").value;
-      if (apiKeyVal) payload.apiKey = apiKeyVal;
-      await trpc("llm.setConfig", payload);
-      document.getElementById("llm-api-key").value = "";
-      statusEl.textContent = "配置已保存";
+      if (embedSel.value) {
+        var parts = embedSel.value.split("::");
+        payload.embeddingProvider = parts[0];
+        payload.embeddingModel = parts[1];
+      }
+      await trpc("llm.setSelection", payload);
+      statusEl.textContent = "模型选择已保存";
     } catch (err) {
       errEl.textContent = err.message || "保存失败";
     }
   });
 
+  var selection = null;
+
   async function loadLlmConfig() {
     var errEl = document.getElementById("llm-error");
     try {
-      var cfg = await trpc("llm.getConfig", {}, "GET");
-      document.getElementById("llm-provider").value = cfg.provider;
-      document.getElementById("llm-base-url").value = cfg.baseUrl || "";
-      document.getElementById("llm-status").textContent = cfg.apiKeyConfigured ? "API Key 已配置" : "未配置 API Key";
-      if (cfg.provider === "workers-ai") {
-        fillModelSelect(document.getElementById("llm-chat-model"), [{ id: "@cf/meta/llama-3.1-8b-instruct-fast", name: "Llama 3.1 8B Instruct (Fast)", kind: "chat" }], "chat", cfg.model);
-      } else if (cfg.model) {
-        var data = await trpc("llm.listModels", { provider: cfg.provider }, "GET");
-        fillModelSelect(document.getElementById("llm-chat-model"), data.models, "chat", cfg.model);
-        fillModelSelect(document.getElementById("llm-embed-model"), data.models, "embedding", null);
+      var cfg = await trpc("llm.getConfigs", {}, "GET");
+      selection = cfg.selection;
+      renderProviderList(cfg.providers);
+      // 自动拉取已配置 provider 的模型列表（填充选择下拉）
+      var configured = cfg.providers.filter(function (p) { return p.apiKeyConfigured; });
+      for (var i = 0; i < configured.length; i++) {
+        var p = configured[i].provider;
+        try {
+          var data = await trpc("llm.listModels", { provider: p }, "GET");
+          providerModels[p] = {
+            chat: data.models.filter(function (m) { return m.kind === "chat"; }),
+            embedding: data.models.filter(function (m) { return m.kind === "embedding"; })
+          };
+        } catch (e) { /* 拉取失败不阻塞 */ }
       }
+      fillSelectionSelects(selection);
     } catch (err) {
       errEl.textContent = err.message || "加载配置失败";
     }
