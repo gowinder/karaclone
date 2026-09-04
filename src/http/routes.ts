@@ -8,11 +8,21 @@ export function isHttpToken(value: string): boolean {
 }
 
 // 扩展 Origin 白名单：仅允许 client-lock 中确定性推导的 Store ID。
+// 支持逗号分隔多值（官方 Store ID + 本地开发固定 key 的 ID）。
 // 动态回显 Access-Control-Request-Headers 中每个符合 HTTP token 语法的头；
 // 非法 header name 或非白名单 Origin 一律不返回 CORS allow header。绝不用 "*"。
+export function isAllowedOrigin(origin: string | null, allowedOriginsCsv: string): boolean {
+  if (!origin) return false;
+  return allowedOriginsCsv
+    .split(",")
+    .map((o) => o.trim())
+    .filter((o) => o.length > 0)
+    .includes(origin);
+}
+
 export function corsPreflight(req: Request, allowedOrigin: string): Response | null {
   const origin = req.headers.get("Origin");
-  if (!origin || origin !== allowedOrigin) return null;
+  if (!origin || !isAllowedOrigin(origin, allowedOrigin)) return null;
 
   const requestedHeaders = req.headers.get("Access-Control-Request-Headers");
   if (requestedHeaders === null) {
@@ -38,7 +48,7 @@ export function corsPreflight(req: Request, allowedOrigin: string): Response | n
 export function corsHeaders(req: Request, allowedOrigin: string): Headers {
   const headers = new Headers();
   const origin = req.headers.get("Origin");
-  if (origin === allowedOrigin) headers.set("Access-Control-Allow-Origin", origin);
+  if (origin && isAllowedOrigin(origin, allowedOrigin)) headers.set("Access-Control-Allow-Origin", origin);
   return headers;
 }
 

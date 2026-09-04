@@ -1,6 +1,7 @@
 // HTTP 层捕获：tRPC envelope、CORS 预检、route 事件。
 // 只以常量查找固定测试头，绝不枚举/保存 header 名称或值。
 import { authenticateApiKey } from "../auth/api-key.js";
+import { isAllowedOrigin } from "../http/routes.js";
 import {
   FIXED_TEST_HEADER,
   hasFixedTestHeader,
@@ -152,7 +153,7 @@ export async function captureTrpcHttp(
 
   const origin = req.headers.get("Origin");
   const isExtension = session.client === "extension";
-  const originMatched = origin === env.ALLOWED_EXTENSION_ORIGIN;
+  const originMatched = isAllowedOrigin(origin, env.ALLOWED_EXTENSION_ORIGIN);
   const isPreflight = req.method === "OPTIONS";
   const acrh = req.headers.get("Access-Control-Request-Headers") ?? "";
   const corsRequested = isExtension && isPreflight ? acrh.toLowerCase().includes(FIXED_TEST_HEADER) : null;
