@@ -309,6 +309,17 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     statusEl.textContent = "拉取中…";
     try {
       var provider = document.getElementById("llm-provider").value;
+      // 先保存当前表单（含新填的 API key），再拉取模型列表
+      var savePayload = {
+        provider: provider,
+        baseUrl: document.getElementById("llm-base-url").value.trim() || undefined,
+        model: document.getElementById("llm-chat-model").value || undefined,
+        embeddingModel: document.getElementById("llm-embed-model").value || undefined
+      };
+      var apiKeyVal = document.getElementById("llm-api-key").value;
+      if (apiKeyVal) savePayload.apiKey = apiKeyVal;
+      await trpc("llm.setConfig", savePayload);
+      document.getElementById("llm-api-key").value = "";
       var data = await trpc("llm.listModels", { provider: provider }, "GET");
       var chat = data.models.filter(function (m) { return m.kind === "chat"; });
       var emb = data.models.filter(function (m) { return m.kind === "embedding"; });
