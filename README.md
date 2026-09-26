@@ -18,6 +18,8 @@ It solves one problem: you keep your bookmarks in your own Cloudflare account, a
 
 Upstream baseline: Karakeep `5a2f009e2f6d266087f2f3f527e6e384cefd6de4` (2026-08-31). Target clients: Karakeep Mobile 1.11.0, Karakeep Browser Extension 1.2.11.
 
+> **Compatibility caveat.** KaraClone implements the **internal tRPC API** the official clients use. That API is private to the Karakeep project and carries **no compatibility guarantee** — unlike Karakeep's public REST API. There is no stability promise across upstream versions: clients newer than the two pinned above may or may not work, and upstream changes can break this implementation until it catches up.
+
 ## Features
 
 - **Instant save** — a URL is persisted immediately; the save never waits on crawling or AI.

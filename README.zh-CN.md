@@ -18,6 +18,8 @@ KaraClone 是从零实现 Karakeep 服务端 API 的子集，部署在 Cloudflar
 
 上游基线：Karakeep `5a2f009e2f6d266087f2f3f527e6e384cefd6de4`（2026-08-31）。目标客户端：Karakeep Mobile 1.11.0、Karakeep Browser Extension 1.2.11。
 
+> **兼容性说明**：KaraClone 实现的是官方客户端使用的**内部 tRPC API**。该 API 属于 Karakeep 项目私有，**不提供兼容性保证**——这与 Karakeep 的公开 REST API 不同。上游版本之间没有稳定性承诺：比上述锁定版本更新的客户端可能可用也可能不可用，上游改动可能使本实现失效，直到跟进为止。
+
 ## 功能特性
 
 - **即时保存** — URL 立即持久化，保存不等待抓取或 AI。
