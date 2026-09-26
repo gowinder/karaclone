@@ -1,155 +1,727 @@
 // 面板：纯静态单页（零构建、零依赖），Worker 直接 serve。
 // 手写轻量 tRPC 客户端（superjson 仅处理 Date），登录/注册/书签管理。
+// 布局：桌面左侧导航（书签/设置/账户），移动端底部 Tab Bar；书签为默认主页。
+// 设计：zinc 中性基底 + 单一暖橙 accent；SVG 图标（无 emoji）；移动端首屏优先。
 
 const DASHBOARD_HTML = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>KaraClone 面板</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0c0a09">
+<title>KaraClone · 书签</title>
 <style>
-  :root { --bg:#f6f7f9; --card:#fff; --border:#e2e5ea; --text:#1a1d21; --muted:#6b7280; --accent:#2563eb; --danger:#dc2626; }
+  :root {
+    --bg:#f5f5f4; --bg-deep:#efece8; --surface:#ffffff; --surface-2:#fafaf9;
+    --border:#e7e5e4; --border-strong:#d6d3d1;
+    --text:#1c1917; --text-2:#57534e; --text-3:#a8a29e;
+    --accent:#ea580c; --accent-strong:#c2410c; --accent-soft:#fff7ed; --accent-border:#fed7aa;
+    --danger:#dc2626; --danger-soft:#fef2f2; --success:#15803d; --success-soft:#f0fdf4;
+    --warn:#b45309; --warn-soft:#fffbeb;
+    --radius-lg:18px; --radius:12px; --radius-sm:8px;
+    --shadow-xs:0 1px 2px rgba(28,25,23,.04);
+    --shadow-sm:0 1px 2px rgba(28,25,23,.04),0 4px 12px -4px rgba(28,25,23,.06);
+    --shadow-md:0 2px 4px rgba(28,25,23,.04),0 12px 32px -12px rgba(28,25,23,.14);
+    --nav-w:244px; --topbar-h:60px;
+    --spring:cubic-bezier(.16,1,.3,1);
+  }
   * { box-sizing:border-box; margin:0; padding:0; }
-  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif; background:var(--bg); color:var(--text); }
-  .container { max-width:720px; margin:0 auto; padding:24px 16px 64px; }
-  header { display:flex; align-items:center; justify-content:space-between; padding:16px 0; border-bottom:1px solid var(--border); margin-bottom:24px; }
-  header h1 { font-size:20px; font-weight:600; }
-  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:20px; margin-bottom:20px; }
-  h2 { font-size:16px; font-weight:600; margin-bottom:14px; }
-  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
-  input { width:100%; padding:9px 12px; border:1px solid var(--border); border-radius:8px; font-size:14px; }
-  input:focus { outline:2px solid var(--accent); outline-offset:-1px; border-color:transparent; }
-  button { padding:9px 16px; border:none; border-radius:8px; font-size:14px; font-weight:500; cursor:pointer; background:var(--accent); color:#fff; margin-top:14px; }
-  button.secondary { background:#e5e7eb; color:var(--text); }
-  button.danger { background:transparent; color:var(--danger); border:1px solid var(--danger); }
-  .row { display:flex; gap:10px; }
-  .row > div { flex:1; }
-  .error { color:var(--danger); font-size:13px; margin-top:8px; min-height:18px; }
-  .bookmark { padding:14px 0; border-bottom:1px solid var(--border); }
-  .bookmark:last-child { border-bottom:none; }
-  .bookmark .title { font-size:15px; font-weight:500; }
-  .bookmark .url { font-size:13px; color:var(--accent); word-break:break-all; }
-  .bookmark .meta { font-size:12px; color:var(--muted); margin-top:4px; }
-  .tag { display:inline-block; background:#eef2ff; color:#3730a3; border-radius:999px; padding:2px 10px; font-size:12px; margin-right:6px; }
-  .hidden { display:none; }
-  .tabs { display:flex; gap:8px; margin-bottom:16px; }
-  .tab { flex:1; text-align:center; padding:10px; border:1px solid var(--border); border-radius:8px; cursor:pointer; background:var(--card); font-size:14px; }
-  .tab.active { background:var(--accent); color:#fff; border-color:var(--accent); }
-  .empty { color:var(--muted); text-align:center; padding:24px 0; font-size:14px; }
-  .muted { color:var(--muted); font-size:13px; }
-  .provider-card { border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:12px; }
-  .provider-card .head { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
-  .provider-card .name { font-size:15px; font-weight:600; }
-  .provider-card .badge { font-size:12px; color:var(--muted); }
-  .provider-card .badge.ok { color:#15803d; }
-  .provider-card .badge.no { color:var(--danger); }
-  .provider-card .actions { display:flex; gap:8px; }
-  .provider-card .actions button { margin-top:0; padding:6px 12px; font-size:13px; }
-  .provider-card .edit-form { display:none; margin-top:10px; }
-  .provider-card .edit-form.open { display:block; }
-  .provider-card .edit-form .row { margin-bottom:8px; }
-  .provider-card .edit-form .row > div { flex:1; }
-  .provider-card .edit-form .hint { font-size:12px; color:var(--muted); margin-top:4px; }
-  .provider-card .edit-form .err { color:var(--danger); font-size:12px; min-height:16px; margin-top:6px; }
-  .provider-card .edit-form .ok { color:#15803d; font-size:12px; min-height:16px; margin-top:6px; }
-  .provider-card .edit-form .fetch-row { display:flex; gap:8px; align-items:center; }
-  .provider-card .edit-form .fetch-row button { margin-top:0; }
-  .provider-card .edit-form .fetch-row .fetch-status { font-size:12px; color:var(--muted); }
-  .provider-card .edit-form .model-row { display:flex; gap:8px; margin-top:8px; }
-  .provider-card .edit-form .model-row select { flex:1; padding:8px; border:1px solid var(--border); border-radius:8px; font-size:13px; }
-  .provider-card .edit-form .model-row .model-count { font-size:12px; color:var(--muted); align-self:center; white-space:nowrap; }
-  .provider-card .edit-form .save-row { display:flex; gap:8px; align-items:center; margin-top:10px; }
-  .provider-card .edit-form .save-row button { margin-top:0; }
-  .provider-card .edit-form .save-row .save-status { font-size:12px; color:var(--muted); }
-  .provider-card .edit-form .test-row { display:flex; gap:8px; align-items:center; margin-top:8px; }
-  .provider-card .edit-form .test-row button { margin-top:0; }
-  .provider-card .edit-form .test-row .test-status { font-size:12px; }
-  .provider-card .edit-form .test-row .test-status.ok { color:#15803d; }
-  .provider-card .edit-form .test-row .test-status.no { color:var(--danger); }
-  .status-badge { display:inline-block; border-radius:999px; padding:2px 10px; font-size:12px; margin-left:8px; vertical-align:middle; }
-  .status-badge.pending { background:#fef3c7; color:#92400e; }
-  .status-badge.success { background:#dcfce7; color:#166534; }
-  .status-badge.failure { background:#fee2e2; color:#991b1b; }
+  html { scroll-behavior:smooth; }
+  body {
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+    background:var(--bg); color:var(--text); -webkit-font-smoothing:antialiased; line-height:1.55;
+    min-height:100dvh;
+  }
+  .hidden { display:none !important; }
+  .muted { color:var(--text-2); font-size:13px; }
+  .mono { font-variant-numeric:tabular-nums; }
+
+  /* ============ 图标 ============ */
+  .ic { width:18px; height:18px; flex:none; }
+  .ic-sm { width:15px; height:15px; flex:none; }
+  .ic path, .ic circle, .ic rect, .ic line, .ic polyline, .ic-sm path, .ic-sm circle, .ic-sm line { stroke:currentColor; fill:none; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+
+  /* ============ 认证页（分割屏） ============ */
+  .auth-wrap { display:flex; min-height:100dvh; }
+  .auth-aside {
+    display:none;
+    width:42%; min-width:380px;
+    background:linear-gradient(160deg,#201a15 0%,#0c0a09 72%);
+    color:#fafaf9;
+    padding:56px 48px;
+    flex-direction:column;
+    justify-content:space-between;
+    position:relative; overflow:hidden;
+  }
+  .auth-aside::after {
+    content:""; position:absolute; inset:0; pointer-events:none;
+    background:radial-gradient(720px 420px at 82% 12%, rgba(234,88,12,.22), transparent 62%),
+               radial-gradient(560px 380px at 8% 92%, rgba(234,88,12,.10), transparent 60%);
+  }
+  .auth-aside .brand-lg { display:flex; align-items:center; gap:10px; font-size:19px; font-weight:650; letter-spacing:-.02em; position:relative; z-index:1; }
+  .auth-aside .mark { width:32px; height:32px; border-radius:9px; background:var(--accent); display:flex; align-items:center; justify-content:center; color:#fff; box-shadow:0 0 0 1px rgba(255,255,255,.14) inset, 0 8px 24px -8px rgba(234,88,12,.55); }
+  .auth-aside blockquote { position:relative; z-index:1; max-width:34ch; }
+  .auth-aside blockquote p { font-size:26px; line-height:1.35; font-weight:600; letter-spacing:-.02em; text-wrap:balance; }
+  .auth-aside blockquote footer { margin-top:18px; font-size:13px; color:rgba(250,250,249,.52); }
+  .auth-main { flex:1; display:flex; align-items:center; justify-content:center; padding:40px 20px 64px; }
+  @media (min-width:1024px) { .auth-aside { display:flex; } }
+  .auth-box { width:100%; max-width:400px; }
+  .auth-brand { display:flex; align-items:center; gap:9px; margin-bottom:28px; }
+  .auth-brand .mark { width:28px; height:28px; border-radius:8px; background:var(--accent); display:flex; align-items:center; justify-content:center; color:#fff; }
+  .auth-brand span { font-size:16px; font-weight:650; letter-spacing:-.02em; }
+  .auth-box h2 { font-size:22px; font-weight:650; letter-spacing:-.02em; margin-bottom:4px; }
+  .auth-box .sub { font-size:13px; color:var(--text-2); margin-bottom:22px; }
+  .form-block { display:flex; flex-direction:column; gap:16px; }
+  .field { display:flex; flex-direction:column; gap:5px; }
+  .field > label { font-size:12px; font-weight:550; color:var(--text-2); letter-spacing:.01em; }
+  .field > input {
+    width:100%; padding:10px 13px; border:1px solid var(--border-strong); border-radius:10px;
+    font-size:14px; background:var(--surface); color:var(--text); font-family:inherit;
+    transition:border-color .15s var(--spring), box-shadow .15s var(--spring);
+  }
+  .field > input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(234,88,12,.12); }
+  .field > textarea {
+    width:100%; padding:9px 13px; border:1px solid var(--border-strong); border-radius:10px;
+    font-size:14px; background:var(--surface); color:var(--text); font-family:inherit; resize:vertical; min-height:52px;
+    transition:border-color .15s var(--spring), box-shadow .15s var(--spring);
+  }
+  .field > textarea:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(234,88,12,.12); }
+  .btn {
+    display:inline-flex; align-items:center; justify-content:center; gap:7px;
+    padding:10px 16px; border:none; border-radius:10px; font-size:14px; font-weight:550;
+    cursor:pointer; background:var(--accent); color:#fff; font-family:inherit;
+    transition:background .15s var(--spring), transform .1s var(--spring), opacity .15s, box-shadow .15s;
+  }
+  .btn:hover { background:var(--accent-strong); }
+  .btn:active { transform:scale(.98); }
+  .btn:disabled { opacity:.55; cursor:not-allowed; }
+  .btn.block { width:100%; }
+  .btn.ghost { background:transparent; color:var(--text-2); }
+  .btn.ghost:hover { background:var(--surface-2); color:var(--text); }
+  .btn.secondary { background:var(--surface); color:var(--text); border:1px solid var(--border-strong); }
+  .btn.secondary:hover { background:var(--surface-2); border-color:var(--text-3); }
+  .btn.danger-ghost { background:transparent; color:var(--danger); border:1px solid rgba(220,38,38,.35); }
+  .btn.danger-ghost:hover { background:var(--danger-soft); }
+  .btn.sm { padding:5px 11px; font-size:12.5px; border-radius:8px; }
+  .error { color:var(--danger); font-size:13px; min-height:16px; }
+  .ok { color:var(--success); font-size:13px; min-height:16px; }
+  .error:not(:empty):before { content:""; }
+  .hint { font-size:12px; color:var(--text-3); }
+  .auth-foot { margin-top:6px; font-size:13px; color:var(--text-3); text-align:center; }
+  .auth-foot a { color:var(--accent-strong); cursor:pointer; text-decoration:none; }
+  .auth-foot a:hover { text-decoration:underline; }
+
+  /* ============ 主应用骨架 ============ */
+  .app { display:flex; min-height:100dvh; }
+
+  /* 桌面侧栏 */
+  .sidebar {
+    display:none;
+    position:fixed; top:0; bottom:0; left:0; width:var(--nav-w);
+    flex-direction:column;
+    background:var(--surface); border-right:1px solid var(--border);
+    padding:22px 14px 16px; z-index:30;
+  }
+  .sidebar .brand { display:flex; align-items:center; gap:9px; padding:2px 10px 20px; }
+  .sidebar .brand .mark { width:30px; height:30px; border-radius:9px; background:var(--accent); display:flex; align-items:center; justify-content:center; color:#fff; box-shadow:0 6px 18px -6px rgba(234,88,12,.5); }
+  .sidebar .brand .bn { font-size:16px; font-weight:650; letter-spacing:-.02em; }
+  .nav-group { display:flex; flex-direction:column; gap:2px; }
+  .nav-group-label { font-size:11px; font-weight:600; color:var(--text-3); letter-spacing:.06em; text-transform:uppercase; padding:14px 12px 6px; }
+  .nav-item {
+    display:flex; align-items:center; gap:10px; width:100%;
+    padding:9px 12px; border:none; border-radius:10px; background:transparent;
+    font-size:14px; font-weight:500; color:var(--text-2); cursor:pointer; font-family:inherit;
+    transition:background .15s var(--spring), color .15s;
+  }
+  .nav-item:hover { background:var(--bg); color:var(--text); }
+  .nav-item.active { background:var(--accent-soft); color:var(--accent-strong); font-weight:600; }
+  .nav-item .nav-badge { margin-left:auto; font-size:11px; font-weight:600; color:var(--text-3); background:var(--bg); border-radius:999px; padding:1px 8px; }
+  .sidebar-foot { margin-top:auto; padding-top:16px; border-top:1px solid var(--border); }
+  .user-row { display:flex; align-items:center; gap:10px; padding:8px 12px 4px; }
+  .avatar {
+    width:34px; height:34px; border-radius:10px; flex:none;
+    background:linear-gradient(150deg,var(--accent-soft),var(--accent-border));
+    color:var(--accent-strong); display:flex; align-items:center; justify-content:center;
+    font-size:14px; font-weight:650; position:relative;
+  }
+  .avatar .dot { position:absolute; right:-1px; bottom:-1px; width:9px; height:9px; border-radius:50%; background:var(--success); border:2px solid var(--surface); animation:pulse 2.4s var(--spring) infinite; }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.45; } }
+  .user-row .u-name { font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .user-row .u-mail { font-size:11.5px; color:var(--text-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .user-row { cursor:pointer; border-radius:10px; transition:background .15s var(--spring); }
+  .user-row:hover { background:var(--bg); }
+  .ver { padding:10px 12px 2px; font-size:11px; color:var(--text-3); font-variant-numeric:tabular-nums; letter-spacing:.02em; }
+
+  /* 内容区 */
+  .main { flex:1; min-width:0; margin-left:0; display:flex; flex-direction:column; }
+  .topbar {
+    display:none; align-items:center; justify-content:space-between;
+    height:var(--topbar-h); padding:0 24px;
+    position:sticky; top:0; z-index:20;
+    background:rgba(245,245,244,.82); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+    border-bottom:1px solid var(--border);
+  }
+  .topbar .page-title { font-size:15px; font-weight:600; letter-spacing:-.01em; }
+  .content { width:100%; max-width:860px; padding:26px 18px 96px; }
+  @media (min-width:768px) {
+    .sidebar { display:flex; }
+    .topbar { display:flex; }
+    .main { margin-left:var(--nav-w); }
+    .content { padding:32px 40px 64px; }
+  }
+
+  /* ============ 书签视图 ============ */
+  .section-head { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:16px; }
+  .section-head h2 { font-size:17px; font-weight:650; letter-spacing:-.02em; }
+  .section-head .count-lbl { font-size:12.5px; color:var(--text-3); }
+
+  .quick-save {
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg);
+    padding:20px; margin-bottom:26px; box-shadow:var(--shadow-xs);
+  }
+  .quick-save .qs-head { display:flex; align-items:center; gap:8px; margin-bottom:14px; }
+  .quick-save .qs-head .ic { color:var(--accent); }
+  .quick-save .qs-head h3 { font-size:14px; font-weight:600; letter-spacing:-.01em; }
+  .qs-form { display:flex; flex-direction:column; gap:12px; }
+  .qs-row { display:grid; grid-template-columns:1fr; gap:12px; }
+  @media (min-width:560px) { .qs-row { grid-template-columns:2fr 1fr; } }
+  .qs-row .field > input { padding:10px 13px; border-radius:10px; }
+  .qs-submit-row { display:flex; align-items:center; gap:12px; }
+  .qs-submit-row .error { margin:0; }
+
+  .bookmark-card {
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg);
+    padding:16px 18px; margin-bottom:12px; box-shadow:var(--shadow-xs);
+    transition:border-color .2s var(--spring), box-shadow .2s var(--spring);
+  }
+  .bookmark-card:hover { border-color:var(--border-strong); box-shadow:var(--shadow-sm); }
+  .bm-top { display:flex; align-items:flex-start; gap:12px; }
+  .bm-favicon {
+    width:34px; height:34px; border-radius:9px; flex:none; margin-top:1px;
+    background:var(--surface-2); border:1px solid var(--border);
+    display:flex; align-items:center; justify-content:center; overflow:hidden;
+  }
+  .bm-favicon img { width:18px; height:18px; border-radius:4px; }
+  .bm-favicon .ic { width:15px; height:15px; color:var(--text-3); }
+  .bm-main { flex:1; min-width:0; }
+  .bm-title-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; min-width:0; }
+  .bm-title { font-size:15px; font-weight:600; letter-spacing:-.01em; cursor:pointer; min-width:0; overflow-wrap:anywhere; }
+  .bm-title:hover { color:var(--accent-strong); }
+  .bm-url { font-size:12px; color:var(--text-3); word-break:break-all; margin-top:3px; }
+  .bm-url a { color:inherit; text-decoration:none; }
+  .bm-url a:hover { color:var(--accent-strong); text-decoration:underline; }
+  .bm-meta { display:flex; align-items:center; gap:7px; margin-top:8px; flex-wrap:wrap; }
+  .bm-date { font-size:12px; color:var(--text-3); font-variant-numeric:tabular-nums; }
+  .bm-meta .sep { width:3px; height:3px; border-radius:50%; background:var(--border-strong); }
+  .chip {
+    display:inline-flex; align-items:center; gap:4px; background:var(--accent-soft);
+    color:var(--accent-strong); border:1px solid transparent; border-radius:999px;
+    padding:2px 9px; font-size:12px; font-weight:500;
+  }
+  .chip[data-act="edit-tags"] { cursor:pointer; }
+  .chip[data-act="edit-tags"]:hover { border-color:var(--accent); }
+  .chip[data-act="edit-tags"] .ic-edit { width:10px; height:10px; opacity:.5; }
+  .chip[data-act="edit-tags"]:hover .ic-edit { opacity:.9; }
+  .chip-x { background:none; border:none; color:inherit; opacity:.55; cursor:pointer; padding:0 0 0 2px; font-size:13px; line-height:1; }
+  .chip-x:hover { opacity:1; }
+  .tag-editor { margin-top:8px; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px; display:flex; flex-direction:column; gap:8px; }
+  .te-current { display:flex; flex-wrap:wrap; gap:5px; align-items:center; }
+  .te-input-row { display:flex; gap:6px; }
+  .te-input { flex:1; padding:6px 10px; border:1px solid var(--border-strong); border-radius:8px; font-size:13px; background:var(--bg); color:var(--text); font-family:inherit; }
+  .te-input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(234,88,12,.12); }
+  .te-all { display:flex; flex-wrap:wrap; gap:5px; max-height:120px; overflow-y:auto; }
+  .tag-opt { border:1px solid var(--border); background:transparent; color:var(--text-2); border-radius:999px; padding:2px 9px; font-size:12px; cursor:pointer; font-family:inherit; }
+  .tag-opt:hover { border-color:var(--accent-border); color:var(--accent-strong); }
+  .tag-opt.on { background:var(--accent-soft); border-color:var(--accent); color:var(--accent-strong); font-weight:500; }
+  .status-badge { display:inline-flex; align-items:center; gap:5px; border-radius:999px; padding:2px 9px; font-size:11px; font-weight:550; }
+  .status-badge .dot { width:5px; height:5px; border-radius:50%; background:currentColor; }
+  .status-badge.pending { background:var(--warn-soft); color:var(--warn); }
+  .status-badge.pending .dot { animation:pulse 1.6s var(--spring) infinite; }
+  .status-badge.success { background:var(--success-soft); color:var(--success); }
+  .status-badge.failure { background:var(--danger-soft); color:var(--danger); }
+  .bm-actions { display:flex; gap:2px; flex:none; }
+  .bm-actions .ic-btn {
+    width:30px; height:30px; display:flex; align-items:center; justify-content:center;
+    border:none; border-radius:8px; background:transparent; color:var(--text-3); cursor:pointer;
+    transition:background .15s, color .15s, transform .1s var(--spring);
+  }
+  .bm-actions .ic-btn:hover { background:var(--bg); color:var(--text); }
+  .bm-actions .ic-btn:active { transform:scale(.92); }
+  .bm-actions .ic-btn.fav.on { color:var(--accent); }
+  .bm-actions .ic-btn.fav.on:hover { background:var(--accent-soft); }
+  .bm-actions .ic-btn.del:hover { background:var(--danger-soft); color:var(--danger); }
+  @media (min-width:768px) { .bm-actions { opacity:0; transition:opacity .18s; } .bookmark-card:hover .bm-actions { opacity:1; } }
+
+  .bm-detail {
+    margin-top:14px; padding:16px; border-radius:12px;
+    background:var(--surface-2); border:1px solid var(--border);
+    display:flex; flex-direction:column; gap:12px;
+    animation:rise .22s var(--spring);
+  }
+  @keyframes rise { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
+  .bm-detail .d-item h4 { font-size:11px; font-weight:600; color:var(--text-3); letter-spacing:.05em; text-transform:uppercase; margin-bottom:5px; }
+  .bm-detail .d-item .txt { font-size:13.5px; color:var(--text-2); white-space:pre-wrap; word-break:break-word; line-height:1.65; }
+  .bm-detail .d-actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .confirm-bar { display:flex; align-items:center; gap:8px; background:var(--danger-soft); border:1px solid rgba(220,38,38,.3); border-radius:10px; padding:8px 12px; font-size:13px; color:var(--danger); margin-top:10px; animation:rise .2s var(--spring); }
+
+  /* 工具栏 */
+  .toolbar { display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center; }
+  .search-box { position:relative; flex:1; min-width:180px; display:flex; align-items:center; }
+  .search-box .ic { position:absolute; left:11px; color:var(--text-3); }
+  .search-box input {
+    width:100%; padding:9px 12px 9px 36px; border:1px solid var(--border-strong); border-radius:10px;
+    font-size:14px; background:var(--surface); color:var(--text); font-family:inherit;
+    transition:border-color .15s var(--spring), box-shadow .15s var(--spring);
+  }
+  .search-box input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(234,88,12,.12); }
+  .filter-group { display:flex; gap:2px; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:3px; }
+  .sort-group { display:flex; gap:2px; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:3px; }
+  .sort-btn { border:none; background:transparent; color:var(--text-3); font-size:12.5px; padding:5px 10px; border-radius:7px; cursor:pointer; font-family:inherit; transition:background .15s, color .15s; }
+  .sort-btn:hover { color:var(--text); }
+  .sort-btn.active { background:var(--accent-soft); color:var(--accent-strong); font-weight:600; }
+  .filter-btn {
+    padding:5px 12px; font-size:12.5px; border:none; border-radius:8px; cursor:pointer;
+    background:transparent; color:var(--text-3); font-weight:500; font-family:inherit;
+    transition:background .15s, color .15s;
+  }
+  .filter-btn:hover { color:var(--text); }
+  .filter-btn.active { background:var(--accent-soft); color:var(--accent-strong); font-weight:600; }
+  .tag-filter { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:16px; }
+  .tag-chip {
+    display:inline-flex; align-items:center; gap:5px; background:var(--surface);
+    border:1px solid var(--border); border-radius:999px; padding:3px 11px; font-size:12px;
+    color:var(--text-2); cursor:pointer; font-family:inherit;
+    transition:border-color .15s, color .15s, background .15s;
+  }
+  .tag-chip:hover { border-color:var(--accent-border); color:var(--accent-strong); }
+  .tag-chip.active { background:var(--accent-soft); border-color:var(--accent); color:var(--accent-strong); font-weight:550; }
+  .tag-chip .cnt { font-size:10.5px; color:var(--text-3); font-variant-numeric:tabular-nums; }
+  .tag-chip.active .cnt { color:var(--accent-strong); opacity:.7; }
+
+  /* 分页 / 空态 / 骨架 */
+  .pagination { display:flex; align-items:center; justify-content:center; gap:12px; margin-top:18px; }
+  .page-info { font-size:12.5px; color:var(--text-3); font-variant-numeric:tabular-nums; }
+  .empty {
+    color:var(--text-3); text-align:center; padding:52px 20px; font-size:14px;
+    background:var(--surface); border:1px dashed var(--border-strong); border-radius:var(--radius-lg);
+  }
+  .empty .empty-ic { width:40px; height:40px; margin:0 auto 12px; color:var(--text-3); opacity:.55; }
+  .empty .empty-t { font-weight:550; color:var(--text-2); margin-bottom:4px; }
+  .skeleton { border-radius:10px; background:linear-gradient(90deg,var(--bg) 25%,var(--bg-deep) 50%,var(--bg) 75%); background-size:200% 100%; animation:shimmer 1.5s infinite; }
+  @keyframes shimmer { 0% { background-position:200% 0; } 100% { background-position:-200% 0; } }
+  .skeleton-card { height:88px; margin-bottom:12px; border-radius:var(--radius-lg); }
+  .load-fail { text-align:center; padding:36px 16px; color:var(--danger); font-size:14px; background:var(--surface); border:1px dashed var(--border-strong); border-radius:var(--radius-lg); }
+
+  /* ============ 设置视图 ============ */
+  .settings-grid { display:grid; gap:22px; grid-template-columns:1fr; }
+  @media (min-width:900px) { .settings-grid { grid-template-columns:5fr 7fr; align-items:start; } }
+  .panel {
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg);
+    padding:20px; box-shadow:var(--shadow-xs);
+  }
+  .panel > h3 { font-size:14px; font-weight:600; letter-spacing:-.01em; margin-bottom:6px; }
+  .panel > .p-desc { font-size:12.5px; color:var(--text-3); margin-bottom:16px; }
+  .panel .field { margin-bottom:12px; }
+  .panel .field > input { padding:9px 12px; border-radius:10px; }
+  .mtn-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  @media (max-width:640px) { .mtn-grid { grid-template-columns:1fr; } }
+  .job-list { display:flex; flex-direction:column; }
+  .job {
+    display:flex; align-items:center; gap:12px; padding:12px 0;
+    border-bottom:1px solid var(--border);
+  }
+  .job:last-child { border-bottom:none; padding-bottom:0; }
+  .job .j-state { width:34px; height:34px; border-radius:9px; flex:none; display:flex; align-items:center; justify-content:center; }
+  .job .j-state.ok { background:var(--success-soft); color:var(--success); }
+  .job .j-state.fail { background:var(--danger-soft); color:var(--danger); }
+  .job .j-state.run { background:var(--accent-soft); color:var(--accent-strong); }
+  .job .j-state.run .ic { animation:spin 2.4s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .job .j-body { flex:1; min-width:0; }
+  .job .j-src { font-size:13px; font-weight:550; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .job .j-desc { font-size:12px; color:var(--text-3); margin-top:2px; }
+  .job .j-actions { display:flex; gap:6px; flex:none; }
+
+  .provider-item { border:1px solid var(--border); border-radius:14px; padding:16px; margin-bottom:12px; background:var(--surface); }
+  .provider-item.open { border-color:var(--accent-border); }
+  .provider-item .p-head { display:flex; align-items:center; gap:12px; }
+  .provider-item .p-icon { width:36px; height:36px; border-radius:10px; flex:none; display:flex; align-items:center; justify-content:center; background:var(--surface-2); border:1px solid var(--border); color:var(--text-2); }
+  .provider-item .p-name { font-size:14px; font-weight:600; }
+  .provider-item .p-desc { font-size:12px; color:var(--text-3); margin-top:1px; }
+  .provider-item .p-badge { margin-left:auto; font-size:11.5px; font-weight:550; padding:2px 9px; border-radius:999px; }
+  .provider-item .p-badge.ok { background:var(--success-soft); color:var(--success); }
+  .provider-item .p-badge.no { background:var(--bg); color:var(--text-3); }
+  .provider-item .edit-form { display:none; margin-top:14px; padding-top:14px; border-top:1px solid var(--border); }
+  .provider-item.open .edit-form { display:block; animation:rise .2s var(--spring); }
+  .edit-form .e-row { display:grid; grid-template-columns:1fr; gap:12px; }
+  @media (min-width:560px) { .edit-form .e-row { grid-template-columns:1fr 1fr; } }
+  .edit-form .e-line { display:flex; gap:8px; align-items:center; margin-top:12px; flex-wrap:wrap; }
+  .edit-form .e-line select { flex:1; min-width:150px; }
+  select {
+    appearance:none; -webkit-appearance:none;
+    width:100%; padding:9px 32px 9px 12px;
+    border:1px solid var(--border-strong); border-radius:10px; font-size:13.5px;
+    background:var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23a8a29e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center;
+    color:var(--text); font-family:inherit; cursor:pointer;
+    transition:border-color .15s var(--spring), box-shadow .15s var(--spring);
+  }
+  select:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(234,88,12,.12); }
+  select:disabled { opacity:.55; cursor:not-allowed; }
+  .e-status { font-size:12px; color:var(--text-3); }
+  .e-status.ok { color:var(--success); }
+  .e-status.no { color:var(--danger); }
+  .edit-form .err { font-size:12.5px; }
+
+  /* ============ 账户视图 ============ */
+  .account-grid { display:grid; gap:22px; grid-template-columns:1fr; }
+  @media (min-width:900px) { .account-grid { grid-template-columns:6fr 6fr; align-items:start; } }
+  .profile-hero {
+    display:flex; align-items:center; gap:16px; padding:24px;
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg);
+    margin-bottom:22px; box-shadow:var(--shadow-xs);
+  }
+  .profile-hero .avatar-lg {
+    width:56px; height:56px; border-radius:16px; flex:none;
+    background:linear-gradient(150deg,var(--accent-soft),var(--accent-border));
+    color:var(--accent-strong); display:flex; align-items:center; justify-content:center;
+    font-size:22px; font-weight:700;
+  }
+  .profile-hero .ph-name { font-size:18px; font-weight:650; letter-spacing:-.02em; }
+  .profile-hero .ph-mail { font-size:13px; color:var(--text-3); margin-top:2px; word-break:break-all; }
+  .profile-hero .ph-tag { margin-left:auto; }
+  .kv-row { display:flex; align-items:center; justify-content:space-between; padding:13px 0; border-bottom:1px solid var(--border); }
+  .kv-row:last-child { border-bottom:none; }
+  .kv-row .k { font-size:13.5px; color:var(--text-2); }
+  .kv-row .v { font-size:13.5px; font-weight:550; display:flex; align-items:center; gap:7px; }
+  .pill { display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:550; padding:2px 10px; border-radius:999px; }
+  .pill.on { background:var(--success-soft); color:var(--success); }
+  .pill.off { background:var(--bg); color:var(--text-3); }
+
+  /* ============ 移动端底部导航 ============ */
+  .tabbar {
+    position:fixed; bottom:0; left:0; right:0; z-index:40;
+    display:flex; justify-content:space-around; align-items:stretch;
+    background:rgba(250,250,249,.92); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
+    border-top:1px solid var(--border);
+    padding:4px 6px calc(6px + env(safe-area-inset-bottom));
+  }
+  .tabbar .tb-item {
+    flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
+    padding:7px 4px 5px; border:none; background:transparent; cursor:pointer;
+    font-size:10.5px; font-weight:550; color:var(--text-3); font-family:inherit;
+    border-radius:10px; transition:color .15s, background .15s;
+  }
+  .tabbar .tb-item .ic { width:21px; height:21px; transition:transform .25s var(--spring); }
+  .tabbar .tb-item.active { color:var(--accent-strong); }
+  .tabbar .tb-item:active { background:var(--bg); }
+  .tabbar .tb-item.active .ic { transform:translateY(-1px); }
+  @media (min-width:768px) { .tabbar { display:none; } }
+
+  /* ============ Toast ============ */
+  .toast {
+    position:fixed; bottom:calc(84px + env(safe-area-inset-bottom)); left:50%; transform:translateX(-50%) translateY(8px);
+    background:#1c1917; color:#fafaf9; padding:10px 18px; border-radius:11px; font-size:13px;
+    box-shadow:var(--shadow-md); opacity:0; pointer-events:none; z-index:100;
+    transition:opacity .22s var(--spring), transform .22s var(--spring);
+  }
+  .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+  .toast.error { background:var(--danger); }
+  @media (min-width:768px) { .toast { bottom:28px; } }
+
+  @media (prefers-reduced-motion:reduce) {
+    *, *::before, *::after { animation-duration:.01ms !important; transition-duration:.01ms !important; }
+  }
 </style>
 </head>
 <body>
-<div class="container">
-  <header>
-    <h1>KaraClone</h1>
-    <button id="logout-btn" class="danger hidden">登出</button>
-  </header>
 
-  <div id="auth-view">
-    <div class="tabs">
-      <div id="tab-login" class="tab active">登录</div>
-      <div id="tab-signup" class="tab">注册</div>
+<!-- 认证页 -->
+<div id="auth-view" class="auth-wrap hidden">
+  <aside class="auth-aside">
+    <div class="brand-lg">
+      <span class="mark">
+        <svg class="ic" viewBox="0 0 24 24"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"/><circle cx="12" cy="12" r="3.2"/></svg>
+      </span>
+      <span>KaraClone</span>
     </div>
-    <div class="card">
-      <form id="login-form">
-        <h2>登录</h2>
-        <label for="login-email">邮箱</label>
-        <input id="login-email" type="email" autocomplete="email" required>
-        <label for="login-password">密码</label>
-        <input id="login-password" type="password" autocomplete="current-password" required>
-        <button type="submit">登录</button>
-        <div class="error" id="login-error"></div>
-      </form>
-      <form id="signup-form" class="hidden">
-        <h2>注册</h2>
-        <label for="signup-name">昵称</label>
-        <input id="signup-name" type="text" required>
-        <label for="signup-email">邮箱</label>
-        <input id="signup-email" type="email" autocomplete="email" required>
-        <label for="signup-password">密码（至少 8 位）</label>
-        <input id="signup-password" type="password" autocomplete="new-password" required>
-        <label for="signup-confirm">确认密码</label>
-        <input id="signup-confirm" type="password" autocomplete="new-password" required>
-        <button type="submit">注册</button>
-        <div class="error" id="signup-error"></div>
-      </form>
+    <blockquote>
+      <p>书签、标签、AI 摘要——一处收纳，随时可读。</p>
+      <footer>你的私藏书签库，由 Cloudflare 驱动。</footer>
+    </blockquote>
+    <div style="font-size:12px;color:rgba(250,250,249,.4);position:relative;z-index:1">KaraClone · Phase 0</div>
+  </aside>
+  <main class="auth-main">
+    <div class="auth-box">
+      <div class="auth-brand">
+        <span class="mark">
+          <svg class="ic" viewBox="0 0 24 24"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"/><circle cx="12" cy="12" r="3.2"/></svg>
+        </span>
+        <span>KaraClone</span>
+      </div>
+      <div id="auth-login-view">
+        <h2>欢迎回来</h2>
+        <p class="sub">登录以继续管理你的书签</p>
+        <form id="login-form" class="form-block">
+          <div class="field">
+            <label for="login-email">邮箱</label>
+            <input id="login-email" type="email" autocomplete="email" required>
+          </div>
+          <div class="field">
+            <label for="login-password">密码</label>
+            <input id="login-password" type="password" autocomplete="current-password" required>
+          </div>
+          <button type="submit" id="login-submit" class="btn block">登录</button>
+          <div class="error" id="login-error"></div>
+        </form>
+        <p class="auth-foot">还没有账号？<a id="to-signup">创建账号</a></p>
+      </div>
+      <div id="auth-signup-view" class="hidden">
+        <h2>创建账号</h2>
+        <p class="sub">注册后即可开始保存书签</p>
+        <form id="signup-form" class="form-block">
+          <div class="field">
+            <label for="signup-name">昵称</label>
+            <input id="signup-name" type="text" required>
+          </div>
+          <div class="field">
+            <label for="signup-email">邮箱</label>
+            <input id="signup-email" type="email" autocomplete="email" required>
+          </div>
+          <div class="field">
+            <label for="signup-password">密码（至少 8 位）</label>
+            <input id="signup-password" type="password" autocomplete="new-password" required>
+          </div>
+          <div class="field">
+            <label for="signup-confirm">确认密码</label>
+            <input id="signup-confirm" type="password" autocomplete="new-password" required>
+          </div>
+          <button type="submit" id="signup-submit" class="btn block">注册</button>
+          <div class="error" id="signup-error"></div>
+        </form>
+        <p class="auth-foot">已有账号？<a id="to-login">直接登录</a></p>
+      </div>
     </div>
-  </div>
+  </main>
+</div>
 
-  <div id="app-view" class="hidden">
-    <div class="tabs">
-      <div id="tab-bookmarks" class="tab active">书签</div>
-      <div id="tab-settings" class="tab">设置</div>
+<!-- 主应用 -->
+<div id="app-view" class="app hidden">
+  <!-- 桌面侧栏 -->
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="mark">
+        <svg class="ic" viewBox="0 0 24 24"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"/><circle cx="12" cy="12" r="3.2"/></svg>
+      </span>
+      <span class="bn">KaraClone</span>
     </div>
-    <div id="bookmarks-view">
-      <div class="card">
-        <h2>保存书签</h2>
-      <form id="save-form">
-        <label for="save-url">URL</label>
-        <input id="save-url" type="url" placeholder="https://example.com" required>
-        <label for="save-title">标题（可选）</label>
-        <input id="save-title" type="text" placeholder="页面标题">
-        <button type="submit">保存</button>
-        <div class="error" id="save-error"></div>
-      </form>
+    <nav class="nav-group">
+      <div class="nav-group-label">书签库</div>
+      <button class="nav-item active" data-nav="bookmarks">
+        <svg class="ic" viewBox="0 0 24 24"><path d="M6 3.5h12A1.5 1.5 0 0 1 19.5 5v16l-4.2-2.6L12 20l-3.3-1.6L4.5 21V5A1.5 1.5 0 0 1 6 3.5Z"/></svg>
+        <span>书签</span>
+        <span class="nav-badge" id="nav-bm-count"></span>
+      </button>
+      <button class="nav-item" data-nav="settings">
+        <svg class="ic" viewBox="0 0 24 24"><path d="M12 8.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8Z"/><path d="M19.2 14.5a1.6 1.6 0 0 0 .32 1.77l.06.06a1.9 1.9 0 1 1-2.68 2.68l-.06-.06a1.6 1.6 0 0 0-1.77-.32 1.6 1.6 0 0 0-.97 1.46V20.4a1.9 1.9 0 1 1-3.79 0v-.08a1.6 1.6 0 0 0-1.05-1.46 1.6 1.6 0 0 0-1.77.32l-.06.06a1.9 1.9 0 1 1-2.68-2.68l.06-.06a1.6 1.6 0 0 0 .32-1.77 1.6 1.6 0 0 0-1.46-.97H3.6a1.9 1.9 0 1 1 0-3.79h.08a1.6 1.6 0 0 0 1.46-1.05 1.6 1.6 0 0 0-.32-1.77l-.06-.06a1.9 1.9 0 1 1 2.68-2.68l.06.06a1.6 1.6 0 0 0 1.77.32h.08a1.6 1.6 0 0 0 .97-1.46V3.6a1.9 1.9 0 1 1 3.79 0v.08a1.6 1.6 0 0 0 .97 1.46 1.6 1.6 0 0 0 1.77-.32l.06-.06a1.9 1.9 0 1 1 2.68 2.68l-.06.06a1.6 1.6 0 0 0-.32 1.77v.08a1.6 1.6 0 0 0 1.46.97h.08a1.9 1.9 0 1 1 0 3.79h-.08a1.6 1.6 0 0 0-1.46.97Z"/></svg>
+        <span>设置</span>
+      </button>
+    </nav>
+    <nav class="nav-group">
+      <div class="nav-group-label">账户</div>
+      <button class="nav-item" data-nav="account">
+        <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="8.4" r="3.6"/><path d="M4.8 20a7.2 7.2 0 0 1 14.4 0"/></svg>
+        <span>账户信息</span>
+      </button>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="user-row" id="user-row" role="button" title="账户信息">
+        <div class="avatar" id="user-avatar"><span class="dot"></span></div>
+        <div style="min-width:0">
+          <div class="u-name" id="user-name"></div>
+          <div class="u-mail" id="user-mail"></div>
+        </div>
+      </div>
+      <div class="ver" id="app-version">v0.2.0</div>
     </div>
-      <div class="card">
-        <h2>书签</h2>
-        <div id="bookmark-list"><div class="empty">加载中…</div></div>
-      </div>
+  </aside>
+
+  <!-- 内容 -->
+  <div class="main">
+    <div class="topbar">
+      <div class="page-title" id="page-title">书签</div>
+      <button id="logout-btn" class="btn ghost sm">登出</button>
     </div>
-    <div id="settings-view" class="hidden">
-      <div class="card">
-        <h2>AI 提供商</h2>
-        <div id="provider-list"><div class="empty">加载中…</div></div>
-      </div>
-      <div class="card">
-        <h2>模型选择</h2>
-        <label for="chat-model-select">对话模型（LLM，打标签/摘要）</label>
-        <select id="chat-model-select"><option value="">先配置并拉取模型</option></select>
-        <label for="embed-model-select">向量模型（Embedding，语义搜索，可选）</label>
-        <select id="embed-model-select"><option value="">不使用向量模型</option></select>
-        <button type="button" id="save-selection">保存模型选择</button>
-        <div class="error" id="llm-error"></div>
-        <div class="muted" id="llm-status"></div>
-      </div>
+    <div class="content">
+
+      <!-- 书签视图（主页） -->
+      <section id="bookmarks-view">
+        <div class="section-head">
+          <h2>书签</h2>
+          <span class="count-lbl" id="bm-count-lbl"></span>
+        </div>
+        <div class="quick-save">
+          <div class="qs-head">
+            <svg class="ic" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <h3>保存书签</h3>
+          </div>
+          <form id="save-form" class="qs-form">
+            <div class="qs-row">
+              <div class="field">
+                <label for="save-url">URL</label>
+                <input id="save-url" type="url" placeholder="https://example.com" required>
+              </div>
+              <div class="field">
+                <label for="save-title">标题（可选）</label>
+                <input id="save-title" type="text" placeholder="页面标题">
+              </div>
+            </div>
+            <div class="field">
+              <label for="save-note">笔记（可选）</label>
+              <textarea id="save-note" rows="2" placeholder="添加备注…"></textarea>
+            </div>
+            <div class="qs-submit-row">
+              <button type="submit" id="save-submit" class="btn">保存</button>
+              <div class="error" id="save-error"></div>
+            </div>
+          </form>
+        </div>
+        <div class="toolbar">
+          <div class="search-box">
+            <svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><line x1="16" y1="16" x2="20.5" y2="20.5"/></svg>
+            <input id="search-input" type="text" placeholder="搜索标题 / URL…">
+          </div>
+          <div class="filter-group" id="filter-group">
+            <button class="filter-btn active" data-filter="all">全部</button>
+            <button class="filter-btn" data-filter="fav">收藏</button>
+            <button class="filter-btn" data-filter="archived">归档</button>
+          </div>
+          <div class="sort-group" id="sort-group">
+            <button class="sort-btn active" data-sort="desc">最新</button>
+            <button class="sort-btn" data-sort="asc">最旧</button>
+          </div>
+        </div>
+        <div class="tag-filter" id="tag-filter"></div>
+        <div id="bookmark-list"></div>
+        <div class="pagination hidden" id="pagination">
+          <button class="btn secondary sm" id="prev-page">上一页</button>
+          <span class="page-info" id="page-info"></span>
+          <button class="btn secondary sm" id="next-page">下一页</button>
+        </div>
+      </section>
+
+      <!-- 设置视图 -->
+      <section id="settings-view" class="hidden">
+        <div class="section-head">
+          <h2>设置</h2>
+          <span class="count-lbl">导入与 AI 配置</span>
+        </div>
+        <div class="settings-grid">
+          <div class="panel">
+            <h3>数据导入</h3>
+            <p class="p-desc">从其他 Karakeep 实例导入书签与标签（按 URL 去重，最多 500 条），后台执行。</p>
+            <form id="import-form">
+              <div class="field">
+                <label for="import-url">源服务器地址</label>
+                <input id="import-url" type="url" placeholder="https://karakeep.example.com" required>
+              </div>
+              <div class="field">
+                <label for="import-email">邮箱</label>
+                <input id="import-email" type="email" autocomplete="off" required>
+              </div>
+              <div class="field">
+                <label for="import-password">密码</label>
+                <input id="import-password" type="password" autocomplete="off" required>
+              </div>
+              <button type="submit" id="import-submit" class="btn block">开始导入</button>
+              <div class="error" id="import-error" style="margin-top:8px"></div>
+            </form>
+            <h3 style="font-size:13px;margin:20px 0 10px">维护任务</h3>
+            <p class="p-desc" style="margin-bottom:10px">后台执行的维护操作，历史与状态见下方任务列表。</p>
+            <div class="mtn-grid">
+              <button type="button" class="btn secondary" data-mtn="import">导入原版数据</button>
+              <button type="button" class="btn secondary" data-mtn="retag">重新统计标签</button>
+              <button type="button" class="btn secondary" data-mtn="translate">翻译标签</button>
+            </div>
+            <h3 style="font-size:13px;margin:20px 0 10px">任务历史</h3>
+            <div class="job-list" id="import-jobs"></div>
+          </div>
+          <div>
+            <div class="panel" style="margin-bottom:20px">
+              <h3>AI 提供商</h3>
+              <p class="p-desc">配置对话与向量模型提供商</p>
+              <div id="provider-list"></div>
+            </div>
+            <div class="panel">
+              <h3>模型选择</h3>
+              <p class="p-desc">选择打标签 / 摘要使用的模型</p>
+              <div class="field">
+                <label for="chat-model-select">对话模型（LLM）</label>
+                <select id="chat-model-select"><option value="">先配置并拉取模型</option></select>
+              </div>
+              <div class="field">
+                <label for="embed-model-select">向量模型（Embedding，可选）</label>
+                <select id="embed-model-select"><option value="">不使用向量模型</option></select>
+              </div>
+              <button type="button" id="save-selection" class="btn block">保存模型选择</button>
+              <div class="error" id="llm-error" style="margin-top:8px"></div>
+              <div class="muted" id="llm-status" style="margin-top:6px"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 账户视图 -->
+      <section id="account-view" class="hidden">
+        <div class="section-head">
+          <h2>账户信息</h2>
+          <span class="count-lbl">个人资料与偏好</span>
+        </div>
+        <div class="profile-hero" id="profile-hero"></div>
+        <div class="account-grid">
+          <div class="panel">
+            <h3>个人资料</h3>
+            <p class="p-desc">当前登录账户的基础信息</p>
+            <div class="kv-row"><span class="k">昵称</span><span class="v" id="acc-name"></span></div>
+            <div class="kv-row"><span class="k">邮箱</span><span class="v" id="acc-email"></span></div>
+            <div class="kv-row"><span class="k">账户 ID</span><span class="v mono" id="acc-id" style="font-size:12px;color:var(--text-3)"></span></div>
+          </div>
+          <div class="panel">
+            <h3>偏好</h3>
+            <p class="p-desc">阅读与行为设置</p>
+            <div class="kv-row"><span class="k">点击书签</span><span class="v" id="acc-click"></span></div>
+            <div class="kv-row"><span class="k">归档显示</span><span class="v" id="acc-archive"></span></div>
+            <div class="kv-row"><span class="k">时区</span><span class="v" id="acc-tz"></span></div>
+            <div class="kv-row"><span class="k">自动备份</span><span class="v"><span class="pill off" id="acc-backup">未启用</span></span></div>
+          </div>
+          <div class="panel" style="margin-top:22px;border-color:rgba(220,38,38,.25)">
+            <h3>会话</h3>
+            <p class="p-desc">登出当前设备</p>
+            <button type="button" id="logout-btn-acc" class="btn danger-ghost">登出</button>
+          </div>
+        </div>
+      </section>
+
     </div>
   </div>
 </div>
+
+<!-- 移动端底部导航 -->
+<nav class="tabbar hidden" id="tabbar">
+  <button class="tb-item active" data-nav="bookmarks">
+    <svg class="ic" viewBox="0 0 24 24"><path d="M6 3.5h12A1.5 1.5 0 0 1 19.5 5v16l-4.2-2.6L12 20l-3.3-1.6L4.5 21V5A1.5 1.5 0 0 1 6 3.5Z"/></svg>
+    <span>书签</span>
+  </button>
+  <button class="tb-item" data-nav="settings">
+    <svg class="ic" viewBox="0 0 24 24"><path d="M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.05.05a2 2 0 1 1-2.83 2.83l-.05-.05a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.55 1.7 1.7 0 0 0-1.87.34l-.05.05a2 2 0 1 1-2.83-2.83l.05-.05a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1.11 1.7 1.7 0 0 0-.34-1.87l-.05-.05a2 2 0 1 1 2.83-2.83l.05.05a1.7 1.7 0 0 0 1.87.34h.08a1.7 1.7 0 0 0 1.03-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.55 1.7 1.7 0 0 0 1.87-.34l.05-.05a2 2 0 1 1 2.83 2.83l-.05.05a1.7 1.7 0 0 0-.34 1.87v.08a1.7 1.7 0 0 0 1.55 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1.03Z"/></svg>
+    <span>设置</span>
+  </button>
+  <button class="tb-item" data-nav="account">
+    <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="8.4" r="3.6"/><path d="M4.8 20a7.2 7.2 0 0 1 14.4 0"/></svg>
+    <span>我的</span>
+  </button>
+</nav>
+
+<div class="toast" id="toast"></div>
 
 <script>
 (function () {
@@ -158,24 +730,69 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   var user = null;
 
   // ---- superjson（仅 Date）----
-  // tRPC v11 HTTP 协议：json 字段直接是数据（transformer 由服务端处理）。
-  // 请求无需 superjson 包装；响应若有 meta.values 需还原 Date。
   function deserializeSuperjson(payload) {
     if (!payload || typeof payload !== "object" || !("json" in payload)) return payload;
     var json = payload.json, meta = payload.meta;
     if (!meta || !meta.values) return json;
-    var i = 0;
-    function walk(v) {
-      if (meta.values[i] === "Date") { i++; return new Date(v); }
-      if (Array.isArray(v)) return v.map(walk);
+    var values = meta.values;
+    if (Array.isArray(values)) {
+      var i = 0;
+      function walkArr(v) {
+        if (values[i] === "Date") { i++; return new Date(v); }
+        if (Array.isArray(v)) return v.map(walkArr);
+        if (v && typeof v === "object") {
+          var o = {};
+          Object.keys(v).forEach(function (k) { o[k] = walkArr(v[k]); });
+          return o;
+        }
+        return v;
+      }
+      return walkArr(json);
+    }
+    // 对象形式：路径 → 类型数组（如 {"bookmarks.0.createdAt": ["Date"]}）
+    function getPath(obj, path) {
+      var cur = obj;
+      var parts = path.split(".");
+      for (var i = 0; i < parts.length; i++) {
+        if (cur == null) return undefined;
+        cur = cur[parts[i]];
+      }
+      return cur;
+    }
+    function setPath(obj, path, val) {
+      var cur = obj;
+      var parts = path.split(".");
+      for (var i = 0; i < parts.length - 1; i++) {
+        if (cur[parts[i]] == null) cur[parts[i]] = {};
+        cur = cur[parts[i]];
+      }
+      cur[parts[parts.length - 1]] = val;
+    }
+    Object.keys(values).forEach(function (path) {
+      var types = values[path];
+      var val = getPath(json, path);
+      if (val === undefined) return;
+      if (types.indexOf("Date") !== -1) setPath(json, path, new Date(val));
+    });
+    return json;
+  }
+
+  // ---- superjson 序列化（仅 Date，对象形式 meta）----
+  function serializeSuperjson(input) {
+    var values = {};
+    function walk(v, path) {
+      if (v instanceof Date) { values[path] = ["Date"]; return v.toISOString(); }
+      if (Array.isArray(v)) return v.map(function (x, i) { return walk(x, path + "." + i); });
       if (v && typeof v === "object") {
         var o = {};
-        Object.keys(v).forEach(function (k) { o[k] = walk(v[k]); });
+        Object.keys(v).forEach(function (k) { o[k] = walk(v[k], path ? path + "." + k : k); });
         return o;
       }
       return v;
     }
-    return walk(json);
+    var json = walk(input, "");
+    var keys = Object.keys(values);
+    return keys.length ? { json: json, meta: { values: values } } : { json: json };
   }
 
   // ---- tRPC 客户端 ----
@@ -185,9 +802,9 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     var url = base + "/api/trpc/" + path + "?batch=1";
     var body;
     if (method === "GET") {
-      url += "&input=" + encodeURIComponent(JSON.stringify({ "0": { json: input || {} } }));
+      url += "&input=" + encodeURIComponent(JSON.stringify({ "0": serializeSuperjson(input || {}) }));
     } else {
-      body = JSON.stringify({ "0": { json: input || {} } });
+      body = JSON.stringify({ "0": serializeSuperjson(input || {}) });
     }
     var res = await fetch(url, { method: method || "POST", headers: headers, body: body });
     var data = await res.json();
@@ -198,39 +815,86 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       err.code = item.error.json && item.error.json.data && item.error.json.data.code;
       throw err;
     }
-    return deserializeSuperjson(item.result.data.json);
+    return deserializeSuperjson(item.result.data);
   }
 
-  // ---- 视图切换 ----
+  // ---- 工具 ----
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function fmtDate(d) {
+    if (!d) return "";
+    var dt = d instanceof Date ? d : new Date(d);
+    if (isNaN(dt.getTime())) return "";
+    var now = new Date();
+    var diff = now - dt;
+    if (diff < 60 * 1000) return "刚刚";
+    if (diff < 3600 * 1000) return Math.floor(diff / 60000) + " 分钟前";
+    if (diff < 24 * 3600 * 1000) return Math.floor(diff / 3600000) + " 小时前";
+    if (diff < 7 * 24 * 3600 * 1000) return Math.floor(diff / 86400000) + " 天前";
+    return dt.toLocaleDateString("zh-CN", { year: "numeric", month: "short", day: "numeric" });
+  }
+  function faviconUrl(url) {
+    try { return "https://www.google.com/s2/favicons?domain=" + encodeURIComponent(new URL(url).hostname) + "&sz=32"; }
+    catch (e) { return ""; }
+  }
+  var toastTimer = null;
+  function toast(msg, isError) {
+    var el = document.getElementById("toast");
+    el.textContent = msg;
+    el.className = "toast show" + (isError ? " error" : "");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.className = "toast"; }, 2600);
+  }
+
+  // ---- 视图切换（三视图 + 侧栏/底部导航同步） ----
+  var VIEW_TITLES = { bookmarks: "书签", settings: "设置", account: "账户信息" };
+  function switchView(name) {
+    ["bookmarks", "settings", "account"].forEach(function (v) {
+      document.getElementById(v + "-view").classList.toggle("hidden", v !== name);
+    });
+    document.querySelectorAll("[data-nav]").forEach(function (el) {
+      el.classList.toggle("active", el.dataset.nav === name);
+    });
+    document.getElementById("page-title").textContent = VIEW_TITLES[name] || "书签";
+    if (name === "bookmarks") { startAutoRefresh(); }
+    else { stopAutoRefresh(); }
+    if (name === "settings") { loadLlmConfig(); loadImportJobs(); startImportPolling(); }
+    else if (name === "account") { loadAccount(); }
+  }
+  document.querySelectorAll("[data-nav]").forEach(function (el) {
+    el.addEventListener("click", function () { switchView(el.dataset.nav); });
+  });
+
+  // ---- 认证可见性 ----
   function showAuth() {
     document.getElementById("auth-view").classList.remove("hidden");
     document.getElementById("app-view").classList.add("hidden");
-    document.getElementById("logout-btn").classList.add("hidden");
+    document.getElementById("tabbar").classList.add("hidden");
   }
   function showApp() {
     document.getElementById("auth-view").classList.add("hidden");
     document.getElementById("app-view").classList.remove("hidden");
-    document.getElementById("logout-btn").classList.remove("hidden");
+    document.getElementById("tabbar").classList.remove("hidden");
   }
 
-  // ---- 登录/注册 ----
-  document.getElementById("tab-login").addEventListener("click", function () {
-    document.getElementById("tab-login").classList.add("active");
-    document.getElementById("tab-signup").classList.remove("active");
-    document.getElementById("login-form").classList.remove("hidden");
-    document.getElementById("signup-form").classList.add("hidden");
-  });
-  document.getElementById("tab-signup").addEventListener("click", function () {
-    document.getElementById("tab-signup").classList.add("active");
-    document.getElementById("tab-login").classList.remove("active");
-    document.getElementById("signup-form").classList.remove("hidden");
-    document.getElementById("login-form").classList.add("hidden");
-  });
+  // ---- 登录 / 注册切换 ----
+  function authSwitch(toLogin) {
+    document.getElementById("auth-login-view").classList.toggle("hidden", !toLogin);
+    document.getElementById("auth-signup-view").classList.toggle("hidden", toLogin);
+  }
+  document.getElementById("to-signup").addEventListener("click", function () { authSwitch(false); });
+  document.getElementById("to-login").addEventListener("click", function () { authSwitch(true); });
 
   document.getElementById("login-form").addEventListener("submit", async function (e) {
     e.preventDefault();
     var errEl = document.getElementById("login-error");
+    var btn = document.getElementById("login-submit");
     errEl.textContent = "";
+    btn.disabled = true;
+    btn.textContent = "登录中…";
     try {
       var email = document.getElementById("login-email").value.trim();
       var password = document.getElementById("login-password").value;
@@ -244,16 +908,22 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       await loadApp();
     } catch (err) {
       errEl.textContent = err.message || "登录失败";
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "登录";
     }
   });
 
   document.getElementById("signup-form").addEventListener("submit", async function (e) {
     e.preventDefault();
     var errEl = document.getElementById("signup-error");
+    var btn = document.getElementById("signup-submit");
     errEl.textContent = "";
     var password = document.getElementById("signup-password").value;
     var confirm = document.getElementById("signup-confirm").value;
     if (password !== confirm) { errEl.textContent = "两次密码不一致"; return; }
+    btn.disabled = true;
+    btn.textContent = "注册中…";
     try {
       await trpc("users.create", {
         name: document.getElementById("signup-name").value.trim(),
@@ -261,47 +931,693 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         password: password,
         confirmPassword: confirm
       });
-      document.getElementById("tab-login").click();
+      authSwitch(true);
       document.getElementById("login-email").value = document.getElementById("signup-email").value.trim();
       document.getElementById("login-password").value = "";
-      document.getElementById("login-error").textContent = "注册成功，请登录";
+      var okEl = document.getElementById("login-error");
+      okEl.textContent = "注册成功，请登录";
+      okEl.style.color = "var(--success)";
     } catch (err) {
       errEl.textContent = err.message || "注册失败";
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "注册";
     }
   });
 
-  document.getElementById("logout-btn").addEventListener("click", function () {
-    apiKey = "";
-    localStorage.removeItem("karaclone_api_key");
-    showAuth();
+  document.getElementById("user-row").addEventListener("click", function () { switchView("account"); });
+
+  document.querySelectorAll("#logout-btn, #logout-btn-acc").forEach(function (el) {
+    if (!el) return;
+    el.addEventListener("click", function () {
+      apiKey = "";
+      localStorage.removeItem("karaclone_api_key");
+      showAuth();
+      toast("已登出");
+    });
   });
 
-  // ---- 设置 tab ----
+  // ---- 书签状态 ----
+  var state = {
+    filter: "all",          // all | fav | archived
+    sortOrder: "desc",      // desc 最新 | asc 最旧
+    tagId: null,
+    search: "",
+    cursor: null,           // 当前页游标（下一页起点）
+    nextCursor: null,       // 服务端返回的下一页游标
+    prevCursors: [],        // 历史游标栈（上一页）
+    hasMore: false,
+    expandedId: null,
+    confirmDeleteId: null,
+    tagEditId: null,
+    bmCache: {},
+    allTags: null,
+    refreshTimer: null
+  };
+
+  // ---- 书签列表 ----
+  function buildQuery() {
+    var q = { limit: 20, includeContent: false, sortOrder: state.sortOrder };
+    if (state.filter === "fav") q.favourited = true;
+    if (state.filter === "archived") q.archived = true;
+    if (state.tagId) q.tagId = state.tagId;
+    if (state.cursor) q.cursor = state.cursor;
+    return q;
+  }
+
+  function renderSkeleton() {
+    var html = "";
+    for (var i = 0; i < 4; i++) html += '<div class="skeleton skeleton-card"></div>';
+    document.getElementById("bookmark-list").innerHTML = html;
+  }
+
+  function statusBadgeHtml(bm) {
+    if (bm.taggingStatus === "pending") return '<span class="status-badge pending"><span class="dot"></span>标签生成中</span>';
+    if (bm.taggingStatus === "failure") return '<span class="status-badge failure"><span class="dot"></span>标签失败</span>';
+    if (bm.taggingStatus === "success") return '<span class="status-badge success"><span class="dot"></span>已生成</span>';
+    return "";
+  }
+
+  function renderEmpty() {
+    var listEl = document.getElementById("bookmark-list");
+    var msgs = {
+      all: ["还没有书签", "保存第一个书签，开启你的书签库"],
+      fav: ["没有收藏", "点书签右侧的星标即可收藏"],
+      archived: ["没有归档", "归档的书签会出现在这里"]
+    };
+    var m = msgs[state.filter] || msgs.all;
+    listEl.innerHTML =
+      '<div class="empty">' +
+        '<svg class="ic empty-ic" viewBox="0 0 24 24"><path d="M20 8.5 12 2 4 8.5v13h16v-13ZM8.8 14.4l2.1 2.1 4.2-4.3"/></svg>' +
+        '<div class="empty-t">' + m[0] + "</div>" +
+        "<div>" + m[1] + "</div>" +
+      "</div>";
+  }
+
+  function cardHtml(bm) {
+      var content = bm.content || {};
+      var url = content.url || bm.url || "";
+      var title = bm.title || content.title || url || "(无标题)";
+      var favicon = url ? faviconUrl(url) : "";
+      var tags = (bm.tags || []).map(function (t) {
+        return '<span class="chip" data-act="edit-tags" data-id="' + bm.id + '" title="编辑标签">' + esc(t.name) + '<svg class="ic-edit" viewBox="0 0 24 24"><path d="M4 20l4.5-1 10-10-3.5-3.5-10 10L4 20Z"/><path d="M13.5 6.5l3.5 3.5"/></svg></span>';
+      }).join("");
+      var tagEditBtn = '<button class="chip" data-act="edit-tags" data-id="' + bm.id + '" title="编辑标签" style="border-style:dashed;opacity:.75">+ 标签</button>';
+      var tagEditorHtml = state.tagEditId === bm.id
+        ? '<div class="tag-editor" data-tag-editor="' + bm.id + '">' +
+            '<div class="te-current">' + (bm.tags || []).map(function (t) {
+              return '<span class="chip">' + esc(t.name) + '<button class="chip-x" data-act="tag-remove" data-id="' + bm.id + '" data-tag="' + t.id + '" title="移除">×</button></span>';
+            }).join("") + "</div>" +
+            '<div class="te-input-row">' +
+              '<input class="te-input" data-tag-input="' + bm.id + '" placeholder="新标签名，回车添加" maxlength="60">' +
+              '<button class="btn sm" data-act="tag-add" data-id="' + bm.id + '">添加</button>' +
+            "</div>" +
+            '<div class="te-all" data-tag-all="' + bm.id + '"></div>' +
+          "</div>"
+        : "";
+      var expanded = state.expandedId === bm.id;
+      var favOn = bm.favourited ? " on" : "";
+      var note = bm.note ? '<div class="d-item"><h4>笔记</h4><p class="txt">' + esc(bm.note) + "</p></div>" : "";
+      var summary = bm.summary ? '<div class="d-item"><h4>摘要</h4><p class="txt">' + esc(bm.summary) + "</p></div>" : "";
+      var detailHtml = expanded
+        ? '<div class="bm-detail">' + note + summary +
+          '<div class="d-actions">' +
+            (url ? '<a href="' + esc(url) + '" target="_blank" rel="noopener"><button class="btn secondary sm">打开原文</button></a>' : "") +
+            '<a href="' + base + '/dashboard/preview/' + bm.id + '" target="_blank" rel="noopener"><button class="btn secondary sm">阅读视图</button></a>' +
+          "</div></div>"
+        : "";
+      var confirmHtml = state.confirmDeleteId === bm.id
+        ? '<div class="confirm-bar">确认删除这条书签？<button class="btn sm" style="background:var(--danger);color:#fff" data-act="confirm-del" data-id="' + bm.id + '">删除</button><button class="btn ghost sm" data-act="cancel-del">取消</button></div>'
+        : "";
+      return (
+        '<div class="bm-top">' +
+          '<div class="bm-favicon">' +
+            (favicon ? '<img src="' + esc(favicon) + '" alt="" loading="lazy">' : '<svg class="ic" viewBox="0 0 24 24"><path d="M8 4l8-1v14l-8 1V4Z"/><path d="M14 20l-8 1"/></svg>') +
+          "</div>" +
+          '<div class="bm-main">' +
+            '<div class="bm-title-row">' +
+              '<span class="bm-title" data-act="toggle-detail" data-id="' + bm.id + '">' + esc(title) + "</span>" +
+              statusBadgeHtml(bm) +
+            "</div>" +
+            (url ? '<div class="bm-url"><a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + "</a></div>" : "") +
+            '<div class="bm-meta">' +
+              '<span class="bm-date">' + fmtDate(bm.createdAt) + "</span>" +
+              (tags ? '<span class="sep"></span>' + tags : "") +
+              (tags ? '<span class="sep"></span>' : "") + tagEditBtn +
+            "</div>" +
+            tagEditorHtml +
+            detailHtml +
+            confirmHtml +
+          "</div>" +
+          '<div class="bm-actions">' +
+            '<button class="ic-btn fav' + favOn + '" data-act="toggle-fav" data-id="' + bm.id + '" title="' + (bm.favourited ? "取消收藏" : "收藏") + '">' +
+              '<svg class="ic-sm" viewBox="0 0 24 24" style="' + (bm.favourited ? "fill:var(--accent)" : "") + '"><path d="M12 3.6 14.6 8l5.4.8-3.9 3.8.9 5.4-4.9-2.6-4.9 2.6.9-5.4L4 8.8 9.4 8 12 3.6Z"/></svg>' +
+            "</button>" +
+            '<button class="ic-btn arch' + (bm.archived ? " on" : "") + '" data-act="toggle-arch" data-id="' + bm.id + '" title="' + (bm.archived ? "取消归档" : "归档") + '" style="' + (bm.archived ? "color:var(--accent)" : "") + '">' +
+              '<svg class="ic-sm" viewBox="0 0 24 24"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="6" x2="4" y2="4h16v2"/><rect x="4" y="6" width="16" height="14" rx="1.5"/><line x1="9" y1="11" x2="15" y2="11"/></svg>' +
+            "</button>" +
+            '<button class="ic-btn del" data-act="ask-del" data-id="' + bm.id + '" title="删除">' +
+              '<svg class="ic-sm" viewBox="0 0 24 24"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>' +
+            "</button>" +
+          "</div>" +
+        "</div>");
+  }
+
+  function renderBookmarks(bookmarks) {
+    var listEl = document.getElementById("bookmark-list");
+    if (!bookmarks.length) { renderEmpty(); return; }
+    listEl.innerHTML = "";
+    bookmarks.forEach(function (bm) {
+      state.bmCache[bm.id] = bm;
+      var div = document.createElement("div");
+      div.className = "bookmark-card";
+      div.setAttribute("data-bm-id", bm.id);
+      div.innerHTML = cardHtml(bm);
+      listEl.appendChild(div);
+    });
+  }
+
+  // 局部更新单张卡片（不整列表刷新）
+  function patchBookmarkCard(id, patch) {
+    var bm = state.bmCache[id];
+    var div = document.querySelector('#bookmark-list [data-bm-id="' + id + '"]');
+    if (!bm || !div) return false;
+    if (patch) Object.assign(bm, patch);
+    div.innerHTML = cardHtml(bm);
+    return true;
+  }
+
+  function removeBookmarkCard(id) {
+    var div = document.querySelector('#bookmark-list [data-bm-id="' + id + '"]');
+    if (div) div.remove();
+    delete state.bmCache[id];
+    if (!document.querySelector("#bookmark-list .bookmark-card")) renderEmpty();
+  }
+
+  function applyTagChange(bm, attached, detached) {
+    bm.tags = bm.tags || [];
+    detached.forEach(function (tid) {
+      bm.tags = bm.tags.filter(function (t) { return t.id !== tid; });
+    });
+    attached.forEach(function (t) {
+      if (!bm.tags.some(function (x) { return x.id === t.id; })) bm.tags.push(t);
+    });
+  }
+
+  async function addTagToBookmark(id, name) {
+    name = String(name || "").trim().replace(/^#+/, "");
+    if (!name) return;
+    try {
+      var res = await trpc("bookmarks.updateTags", { bookmarkId: id, attach: [{ tagName: name }], detach: [] });
+      var bm = state.bmCache[id];
+      if (bm) {
+        applyTagChange(bm, [{ id: res.attached[0], name: name }], []);
+        patchBookmarkCard(id);
+      }
+      loadTagFilter();
+    } catch (err) { toast(err.message || "添加标签失败", true); }
+  }
+
+  async function loadTagCandidates(id) {
+    try {
+      var data = await trpc("tags.list", { limit: 100, sortBy: "name" }, "GET");
+      state.allTags = data.tags;
+      var el = document.querySelector('[data-tag-all="' + id + '"]');
+      if (!el) return;
+      var bm = state.bmCache[id];
+      var have = new Set((bm && bm.tags || []).map(function (t) { return t.id; }));
+      el.innerHTML = state.allTags.map(function (t) {
+        return '<button class="tag-opt' + (have.has(t.id) ? " on" : "") + '" data-act="tag-opt-toggle" data-id="' + id + '" data-tag="' + t.id + '">' + esc(t.name) + "</button>";
+      }).join("");
+    } catch (e) { /* 候选加载失败不阻塞 */ }
+  }
+
+  async function loadBookmarks(keepCursor) {
+    if (!keepCursor) {
+      state.cursor = null;
+      state.nextCursor = null;
+      state.prevCursors = [];
+    }
+    renderSkeleton();
+    try {
+      var data = await trpc("bookmarks.getBookmarks", buildQuery(), "GET");
+      state.hasMore = !!data.nextCursor;
+      state.nextCursor = data.nextCursor || null;
+      renderBookmarks(data.bookmarks || []);
+      updatePagination();
+    } catch (err) {
+      document.getElementById("bookmark-list").innerHTML =
+        '<div class="load-fail">加载失败：' + esc(err.message || "未知错误") + "</div>";
+    }
+  }
+
+  function updatePagination() {
+    var el = document.getElementById("pagination");
+    if (!state.hasMore && !state.prevCursors.length) {
+      el.classList.add("hidden");
+      return;
+    }
+    el.classList.remove("hidden");
+    document.getElementById("page-info").textContent =
+      "第 " + (state.prevCursors.length + 1) + " 页";
+    document.getElementById("prev-page").disabled = state.prevCursors.length === 0;
+    document.getElementById("next-page").disabled = !state.hasMore;
+  }
+
+  document.getElementById("prev-page").addEventListener("click", function () {
+    if (!state.prevCursors.length) return;
+    state.cursor = state.prevCursors.pop();
+    loadBookmarks(true);
+  });
+  document.getElementById("next-page").addEventListener("click", function () {
+    if (!state.hasMore) return;
+    state.prevCursors.push(state.cursor);
+    state.cursor = state.nextCursor;
+    loadBookmarks(true);
+  });
+
+  // ---- 筛选 ----
+  document.getElementById("filter-group").addEventListener("click", function (e) {
+    var btn = e.target.closest(".filter-btn");
+    if (!btn) return;
+    document.querySelectorAll(".filter-btn").forEach(function (b) { b.classList.remove("active"); });
+    btn.classList.add("active");
+    state.filter = btn.dataset.filter;
+    state.tagId = null;
+    document.querySelectorAll(".tag-chip").forEach(function (c) { c.classList.remove("active"); });
+    loadBookmarks(false);
+  });
+
+  // ---- 排序 ----
+  document.getElementById("sort-group").addEventListener("click", function (e) {
+    var btn = e.target.closest(".sort-btn");
+    if (!btn) return;
+    document.querySelectorAll(".sort-btn").forEach(function (b) { b.classList.remove("active"); });
+    btn.classList.add("active");
+    state.sortOrder = btn.dataset.sort;
+    loadBookmarks(false);
+  });
+
+  var searchDebounce = null;
+  document.getElementById("search-input").addEventListener("input", function (e) {
+    clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(function () {
+      state.search = e.target.value.trim();
+      loadBookmarks(false);
+    }, 350);
+  });
+
+  // ---- 标签筛选 ----
+  async function loadTagFilter() {
+    try {
+      var data = await trpc("tags.list", { limit: 30, sortBy: "usage" }, "GET");
+      var el = document.getElementById("tag-filter");
+      if (!data.tags.length) { el.innerHTML = ""; return; }
+      el.innerHTML = data.tags.map(function (t) {
+        return '<button class="tag-chip" data-tag="' + t.id + '">' + esc(t.name) + ' <span class="cnt">' + t.numBookmarks + "</span></button>";
+      }).join("");
+      el.querySelectorAll(".tag-chip").forEach(function (chip) {
+        chip.addEventListener("click", function () {
+          var active = chip.classList.contains("active");
+          document.querySelectorAll(".tag-chip").forEach(function (c) { c.classList.remove("active"); });
+          if (active) {
+            state.tagId = null;
+          } else {
+            chip.classList.add("active");
+            state.tagId = chip.dataset.tag;
+          }
+          loadBookmarks(false);
+        });
+      });
+    } catch (e) { /* 标签加载失败不阻塞 */ }
+  }
+
+  // ---- 书签操作 ----
+  document.getElementById("bookmark-list").addEventListener("click", async function (e) {
+    var btn = e.target.closest("[data-act]");
+    if (!btn) return;
+    var act = btn.dataset.act;
+    var id = btn.dataset.id;
+
+    if (act === "toggle-detail") {
+      state.expandedId = state.expandedId === id ? null : id;
+      state.confirmDeleteId = null;
+      state.tagEditId = null;
+      patchBookmarkCard(id);
+      return;
+    }
+    if (act === "ask-del") {
+      state.confirmDeleteId = id;
+      state.tagEditId = null;
+      patchBookmarkCard(id);
+      return;
+    }
+    if (act === "cancel-del") {
+      state.confirmDeleteId = null;
+      patchBookmarkCard(id);
+      return;
+    }
+    if (act === "confirm-del") {
+      try {
+        await trpc("bookmarks.deleteBookmark", { bookmarkId: id });
+        state.confirmDeleteId = null;
+        toast("书签已删除");
+        removeBookmarkCard(id);
+        loadTagFilter();
+      } catch (err) {
+        toast(err.message || "删除失败", true);
+      }
+      return;
+    }
+    if (act === "toggle-fav") {
+      try {
+        var nowFav = btn.classList.contains("on");
+        await trpc("bookmarks.updateBookmark", { bookmarkId: id, favourited: !nowFav });
+        toast(nowFav ? "已取消收藏" : "已收藏");
+        patchBookmarkCard(id, { favourited: !nowFav });
+      } catch (err) { toast(err.message || "操作失败", true); }
+      return;
+    }
+    if (act === "toggle-arch") {
+      try {
+        var nowArch = btn.classList.contains("on");
+        await trpc("bookmarks.updateBookmark", { bookmarkId: id, archived: !nowArch });
+        toast(nowArch ? "已取消归档" : "已归档");
+        if (state.filter === "archived") {
+          removeBookmarkCard(id);
+        } else {
+          patchBookmarkCard(id, { archived: !nowArch });
+        }
+      } catch (err) { toast(err.message || "操作失败", true); }
+      return;
+    }
+    if (act === "edit-tags") {
+      state.tagEditId = state.tagEditId === id ? null : id;
+      state.confirmDeleteId = null;
+      patchBookmarkCard(id);
+      if (state.tagEditId === id) loadTagCandidates(id);
+      return;
+    }
+    if (act === "tag-remove") {
+      var tid = btn.dataset.tag;
+      try {
+        await trpc("bookmarks.updateTags", { bookmarkId: id, attach: [], detach: [{ tagId: tid }] });
+        var bm = state.bmCache[id];
+        if (bm) {
+          applyTagChange(bm, [], [tid]);
+          patchBookmarkCard(id);
+          loadTagCandidates(id);
+        }
+        loadTagFilter();
+      } catch (err) { toast(err.message || "移除标签失败", true); }
+      return;
+    }
+    if (act === "tag-add") {
+      var input = document.querySelector('[data-tag-input="' + id + '"]');
+      if (!input) return;
+      await addTagToBookmark(id, input.value);
+      input.value = "";
+      loadTagCandidates(id);
+      return;
+    }
+    if (act === "tag-opt-toggle") {
+      var optTid = btn.dataset.tag;
+      var optBm = state.bmCache[id];
+      var optOn = optBm && optBm.tags.some(function (t) { return t.id === optTid; });
+      try {
+        var optRes = await trpc("bookmarks.updateTags", {
+          bookmarkId: id,
+          attach: optOn ? [] : [{ tagId: optTid }],
+          detach: optOn ? [{ tagId: optTid }] : []
+        });
+        if (optBm) {
+          if (optOn) {
+            applyTagChange(optBm, [], [optTid]);
+          } else {
+            var optTag = (state.allTags || []).filter(function (t) { return t.id === optTid; })[0];
+            applyTagChange(optBm, [{ id: optTid, name: optTag ? optTag.name : "" }], []);
+          }
+          patchBookmarkCard(id);
+          loadTagCandidates(id);
+        }
+        loadTagFilter();
+      } catch (err) { toast(err.message || "操作失败", true); }
+      return;
+    }
+  });
+
+  // 标签编辑器：回车添加
+  document.getElementById("bookmark-list").addEventListener("keydown", function (e) {
+    if (e.key !== "Enter") return;
+    var input = e.target.closest("[data-tag-input]");
+    if (!input) return;
+    e.preventDefault();
+    var id = input.getAttribute("data-tag-input");
+    addTagToBookmark(id, input.value).then(function () {
+      input.value = "";
+      loadTagCandidates(id);
+    });
+  });
+
+  // ---- 保存书签 ----
+  document.getElementById("save-form").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    var errEl = document.getElementById("save-error");
+    var btn = document.getElementById("save-submit");
+    errEl.textContent = "";
+    btn.disabled = true;
+    btn.textContent = "保存中…";
+    try {
+      var payload = {
+        type: "link",
+        url: document.getElementById("save-url").value.trim(),
+        title: document.getElementById("save-title").value.trim() || null,
+        source: "web"
+      };
+      var note = document.getElementById("save-note").value.trim();
+      if (note) payload.note = note;
+      var result = await trpc("bookmarks.createBookmark", payload);
+      document.getElementById("save-url").value = "";
+      document.getElementById("save-title").value = "";
+      document.getElementById("save-note").value = "";
+      toast(result.alreadyExists ? "书签已存在" : "书签已保存");
+      state.filter = "all";
+      document.querySelectorAll(".filter-btn").forEach(function (b) {
+        b.classList.toggle("active", b.dataset.filter === "all");
+      });
+      state.tagId = null;
+      document.querySelectorAll(".tag-chip").forEach(function (c) { c.classList.remove("active"); });
+      await loadBookmarks(false);
+      await loadTagFilter();
+      // 轮询等待标签生成（最多 60s，每 3s 一次）
+      var attempts = 0;
+      var timer = setInterval(async function () {
+        attempts++;
+        try {
+          var data = await trpc("bookmarks.getBookmarks", { limit: 20, includeContent: false }, "GET");
+          var pending = (data.bookmarks || []).some(function (b) { return b.taggingStatus === "pending"; });
+          if (!pending || attempts >= 20) {
+            clearInterval(timer);
+            await loadBookmarks(true);
+            await loadTagFilter();
+          }
+        } catch (err) {
+          clearInterval(timer);
+        }
+      }, 3000);
+    } catch (err) {
+      errEl.textContent = err.message || "保存失败";
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "保存";
+    }
+  });
+
+  // ---- 自动刷新 ----
+  function startAutoRefresh() {
+    stopAutoRefresh();
+    state.refreshTimer = setInterval(async function () {
+      if (document.getElementById("bookmarks-view").classList.contains("hidden")) return;
+      try {
+        var data = await trpc("bookmarks.getBookmarks", buildQuery(), "GET");
+        state.hasMore = !!data.nextCursor;
+        renderBookmarks(data.bookmarks || []);
+        updatePagination();
+      } catch (e) { /* 静默失败，下次重试 */ }
+    }, 15000);
+  }
+  function stopAutoRefresh() {
+    if (state.refreshTimer) { clearInterval(state.refreshTimer); state.refreshTimer = null; }
+  }
+
+  // ---- 数据导入（后台任务）----
+  var importJobs = [];
+  var importPollTimer = null;
+
+  var KIND_NAMES = { import: "导入", fix: "修复", retag: "重新统计标签", translate: "翻译标签" };
+  function kindName(kind) { return KIND_NAMES[kind] || "任务"; }
+  function fmtJobStatus(job) {
+    if (job.status === "pending") return "排队中";
+    if (job.status === "running") return kindName(job.kind) + "中 " + (job.imported + job.skipped + job.failed) + "/" + job.total;
+    if (job.status === "success") return kindName(job.kind) + "完成";
+    return "失败";
+  }
+
+  function jobIconHtml(kind, status) {
+    var icon = kind === "fix"
+      ? '<path d="M12 4v10m0 0-4-4m4 4 4-4"/><path d="M5 19h14"/>'
+      : kind === "retag"
+        ? '<path d="M4 7h16M4 12h16M4 17h16"/><circle cx="9" cy="7" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="9" cy="17" r="2"/>'
+        : kind === "translate"
+          ? '<path d="M4 5h10M9 3v2M6.5 5c0 4 3 7 7 8M13 13l-2 2M11 15l-3 3M8 12c-1.5-1-3-3-3.5-5"/>'
+          : '<path d="M12 5v14m0 0 5-5m-5 5-5-5"/><line x1="4" y1="4" x2="4" y2="8"/><line x1="4" y1="4" x2="8" y2="4"/>';
+    if (status === "success") icon = '<path d="M5 12.5 10 17.5 19.5 7"/>';
+    if (status === "failed") icon = '<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>';
+    return '<svg class="ic" viewBox="0 0 24 24">' + icon + "</svg>";
+  }
+
+  function renderImportJobs() {
+    var el = document.getElementById("import-jobs");
+    if (!importJobs.length) {
+      el.innerHTML = '<div class="empty" style="padding:26px 14px;font-size:13px;border-style:solid">暂无导入记录</div>';
+      return;
+    }
+    var html = "";
+    for (var i = 0; i < importJobs.length; i++) {
+      var j = importJobs[i];
+      var stateCls = j.status === "success" ? "ok" : j.status === "failed" ? "fail" : "run";
+      var detail = j.status === "success"
+        ? (j.kind === "retag" ? "已统计 " + j.imported + " 个标签" : j.kind === "translate" ? "翻译 " + j.skipped + " 个标签" + (j.failed > 0 ? " · 失败 " + j.failed : "") : "新增 " + j.imported + " · 跳过 " + j.skipped + (j.failed > 0 ? " · 失败 " + j.failed : ""))
+        : j.status === "failed"
+          ? (j.error || "任务失败")
+          : "已处理 " + (j.imported + j.skipped + j.failed) + "/" + j.total;
+      html +=
+        '<div class="job" data-id="' + j.id + '">' +
+          '<div class="j-state ' + stateCls + '">' + jobIconHtml(j.kind, j.status) + "</div>" +
+          '<div class="j-body">' +
+            '<div class="j-src" title="' + esc(j.sourceUrl) + '">' + kindName(j.kind) + (j.sourceUrl ? " · " + esc(j.sourceUrl) : "") + "</div>" +
+            '<div class="j-desc">' + fmtJobStatus(j) + " · " + esc(detail) + "</div>" +
+          "</div>" +
+          '<div class="j-actions">' +
+            (j.status === "failed" ? '<button type="button" class="btn secondary sm" data-act="retry">重试</button>' : "") +
+            (j.status === "success" && j.kind === "import" ? '<button type="button" class="btn secondary sm" data-act="fix">修复</button>' : "") +
+          "</div>" +
+        "</div>";
+    }
+    el.innerHTML = html;
+  }
+
+  async function loadImportJobs() {
+    try {
+      importJobs = await trpc("imports.listImportJobs", {}, "GET");
+      renderImportJobs();
+    } catch (e) { /* 静默 */ }
+  }
+
+  function startImportPolling() {
+    if (importPollTimer) return;
+    importPollTimer = setInterval(function () {
+      loadImportJobs();
+    }, 4000);
+  }
+  function stopImportPolling() {
+    if (importPollTimer) { clearInterval(importPollTimer); importPollTimer = null; }
+  }
+  document.addEventListener("beforeunload", function () { stopImportPolling(); stopAutoRefresh(); });
+
+  document.getElementById("import-form").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    var errEl = document.getElementById("import-error");
+    var btn = document.getElementById("import-submit");
+    errEl.textContent = "";
+    btn.disabled = true;
+    btn.textContent = "提交中…";
+    try {
+      var payload = {
+        sourceUrl: document.getElementById("import-url").value.trim(),
+        email: document.getElementById("import-email").value.trim(),
+        password: document.getElementById("import-password").value
+      };
+      var job = await trpc("imports.startImportJob", payload);
+      toast("导入任务已创建，后台执行中");
+      document.getElementById("import-password").value = "";
+      await loadImportJobs();
+      startImportPolling();
+    } catch (err) {
+      errEl.textContent = err.message || "创建导入任务失败";
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "开始导入";
+    }
+  });
+
+  document.querySelectorAll("[data-mtn]").forEach(function (btn) {
+    btn.addEventListener("click", async function () {
+      var kind = btn.getAttribute("data-mtn");
+      var label = kind === "import" ? "导入" : kind === "retag" ? "重新统计标签" : "翻译标签";
+      btn.disabled = true;
+      var oldText = btn.textContent;
+      btn.textContent = "创建中…";
+      try {
+        if (kind === "import") {
+          document.getElementById("import-url").focus();
+          toast("请填写源服务器信息后点击「开始导入」");
+        } else {
+          await trpc("imports.startMaintenanceJob", { kind: kind });
+          toast(label + "任务已创建，后台执行中");
+          await loadImportJobs();
+          startImportPolling();
+        }
+      } catch (err) {
+        toast(err.message || "创建" + label + "任务失败");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = oldText;
+      }
+    });
+  });
+
+  document.getElementById("import-jobs").addEventListener("click", async function (e) {
+    var btn = e.target.closest("button[data-act='retry'], button[data-act='fix']");
+    if (!btn) return;
+    if (btn.disabled) return;
+    var jobEl = btn.closest(".job");
+    if (!jobEl) return;
+    var jobId = jobEl.getAttribute("data-id");
+    var isFix = btn.getAttribute("data-act") === "fix";
+    btn.disabled = true;
+    btn.textContent = isFix ? "修复中…" : "重试中…";
+    try {
+      if (isFix) {
+        await trpc("imports.fixImportedData", { jobId: jobId });
+        toast("修复任务已创建，后台执行中");
+      } else {
+        await trpc("imports.retryImportJob", { jobId: jobId });
+        toast("已重新入队");
+      }
+      await loadImportJobs();
+      startImportPolling();
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = isFix ? "修复" : "重试";
+      var errEl = document.getElementById("import-error");
+      errEl.textContent = err.message || (isFix ? "创建修复任务失败" : "重试失败");
+    }
+  });
+
+  // ---- AI 提供商 ----
   var PROVIDER_META = {
     "workers-ai": { name: "Workers AI", desc: "Cloudflare 内置，免费额度", defaultUrl: "" },
     "openrouter": { name: "OpenRouter", desc: "聚合多家模型，按量付费", defaultUrl: "https://openrouter.ai/api/v1" },
     "ollama-cloud": { name: "Ollama Cloud", desc: "Ollama 官方云服务", defaultUrl: "https://ollama.com" }
   };
-  var providerModels = {}; // provider -> { chat: [], embedding: [] }
+  var providerModels = {};
+  var selection = null;
 
-  document.getElementById("tab-bookmarks").addEventListener("click", function () {
-    document.getElementById("tab-bookmarks").classList.add("active");
-    document.getElementById("tab-settings").classList.remove("active");
-    document.getElementById("bookmarks-view").classList.remove("hidden");
-    document.getElementById("settings-view").classList.add("hidden");
-  });
-  document.getElementById("tab-settings").addEventListener("click", function () {
-    document.getElementById("tab-settings").classList.add("active");
-    document.getElementById("tab-bookmarks").classList.remove("active");
-    document.getElementById("settings-view").classList.remove("hidden");
-    document.getElementById("bookmarks-view").classList.add("hidden");
-    loadLlmConfig();
-  });
-
-  function esc(s) {
-    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
-      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
-    });
+  function providerIcon(p) {
+    if (p === "workers-ai") return '<path d="M12 2 4 7v10l8 5 8-5V7l-8-5Z"/><path d="M12 22V12"/><path d="m4 7 8 5 8-5"/>';
+    if (p === "openrouter") return '<circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M19.1 4.9l-2.8 2.8M7.7 16.3l-2.8 2.8"/>';
+    return '<path d="M4 17V7a1 1 0 0 1 1.5-.9l12 6a1 1 0 0 1 0 1.8l-12 6A1 1 0 0 1 4 17Z"/>';
   }
 
   function renderProviderList(providers) {
@@ -311,49 +1627,46 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       var meta = PROVIDER_META[p];
       var cfg = providers.find(function (x) { return x.provider === p; });
       var badge = cfg
-        ? '<span class="badge ok">已配置' + (cfg.apiKeyConfigured ? " · Key 已存" : "") + "</span>"
-        : '<span class="badge no">未配置</span>';
+        ? '<span class="p-badge ok">已配置' + (cfg.apiKeyConfigured ? " · Key 已存" : "") + "</span>"
+        : '<span class="p-badge no">未配置</span>';
       html +=
-        '<div class="provider-card" data-provider="' + p + '">' +
-          '<div class="head">' +
-            '<div><div class="name">' + meta.name + "</div><div class='badge'>" + meta.desc + "</div></div>" +
-            '<div class="actions">' + badge +
-              '<button type="button" class="secondary" data-act="edit">' + (cfg ? "编辑" : "配置") + "</button>" +
-            "</div>" +
+        '<div class="provider-item" data-provider="' + p + '">' +
+          '<div class="p-head">' +
+            '<div class="p-icon"><svg class="ic" viewBox="0 0 24 24">' + providerIcon(p) + "</svg></div>" +
+            '<div><div class="p-name">' + meta.name + "</div><div class='p-desc'>" + meta.desc + "</div></div>" +
+            badge +
+            '<button type="button" class="btn secondary sm" data-act="edit">' + (cfg ? "编辑" : "配置") + "</button>" +
           "</div>" +
           '<div class="edit-form">' +
-            '<div class="row">' +
-              '<div><label>Base URL</label><input type="url" data-f="url" placeholder="' + meta.defaultUrl + '"></div>' +
-              '<div><label>API Key（留空保持不变）</label><input type="password" data-f="key" autocomplete="off" placeholder="sk-..."></div>' +
+            '<div class="e-row">' +
+              '<div class="field"><label>Base URL</label><input type="url" data-f="url" placeholder="' + meta.defaultUrl + '"></div>' +
+              '<div class="field"><label>API Key（留空保持不变）</label><input type="password" data-f="key" autocomplete="off" placeholder="sk-..."></div>' +
             "</div>" +
-            '<div class="fetch-row">' +
-              '<button type="button" class="secondary" data-act="fetch">拉取模型列表</button>' +
-              '<span class="fetch-status"></span>' +
+            '<div class="e-line">' +
+              '<button type="button" class="btn secondary sm" data-act="fetch">拉取模型列表</button>' +
+              '<span class="e-status fetch-status"></span>' +
             "</div>" +
-            '<div class="model-row">' +
+            '<div class="e-line">' +
               '<select data-f="chat"><option value="">对话模型</option></select>' +
               '<select data-f="embed"><option value="">向量模型</option></select>' +
-              '<span class="model-count"></span>' +
             "</div>" +
-            '<div class="save-row">' +
-              '<button type="button" data-act="save">保存</button>' +
-              '<span class="save-status"></span>' +
+            '<div class="e-line">' +
+              '<button type="button" class="btn sm" data-act="save">保存</button>' +
+              '<span class="e-status save-status"></span>' +
+              '<button type="button" class="btn secondary sm" data-act="test">测试连接</button>' +
+              '<span class="e-status test-status"></span>' +
             "</div>" +
-            '<div class="test-row">' +
-              '<button type="button" class="secondary" data-act="test">测试连接</button>' +
-              '<span class="test-status"></span>' +
-            "</div>" +
-            '<div class="err"></div>' +
+            '<div class="err" style="margin-top:8px"></div>' +
           "</div>" +
         "</div>";
     });
     list.innerHTML = html;
-    list.querySelectorAll(".provider-card").forEach(function (card) {
+    list.querySelectorAll(".provider-item").forEach(function (card) {
       var p = card.dataset.provider;
       var cfg = providers.find(function (x) { return x.provider === p; });
       if (cfg && cfg.baseUrl) card.querySelector('[data-f="url"]').value = cfg.baseUrl;
       card.querySelector('[data-act="edit"]').addEventListener("click", function () {
-        card.querySelector(".edit-form").classList.toggle("open");
+        card.classList.toggle("open");
       });
       card.querySelector('[data-act="fetch"]').addEventListener("click", function () { fetchModels(card, p); });
       card.querySelector('[data-act="save"]').addEventListener("click", function () { saveProvider(card, p); });
@@ -366,14 +1679,14 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     var statusEl = card.querySelector(".test-status");
     errEl.textContent = "";
     statusEl.textContent = "测试中…";
-    statusEl.className = "test-status";
+    statusEl.className = "e-status test-status";
     try {
       var data = await trpc("llm.testProvider", { provider: provider });
       statusEl.textContent = data.message + (data.latencyMs != null ? "（" + data.latencyMs + "ms）" : "");
-      statusEl.className = "test-status " + (data.ok ? "ok" : "no");
+      statusEl.className = "e-status test-status " + (data.ok ? "ok" : "no");
     } catch (err) {
       statusEl.textContent = err.message || "测试失败";
-      statusEl.className = "test-status no";
+      statusEl.className = "e-status test-status no";
     }
   }
 
@@ -383,7 +1696,6 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     errEl.textContent = "";
     statusEl.textContent = "拉取中…";
     try {
-      // 先保存当前表单（含新填的 key），再拉取
       var url = card.querySelector('[data-f="url"]').value.trim() || undefined;
       var key = card.querySelector('[data-f="key"]').value;
       var payload = { provider: provider };
@@ -452,18 +1764,18 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       await trpc("llm.setProviderConfig", payload);
       card.querySelector('[data-f="key"]').value = "";
       statusEl.textContent = "已保存";
+      statusEl.className = "e-status save-status ok";
       loadLlmConfig();
     } catch (err) {
       errEl.textContent = err.message || "保存失败";
     }
   }
 
-  function fillSelectionSelects(selection) {
+  function fillSelectionSelects(sel) {
     var chatSel = document.getElementById("chat-model-select");
     var embedSel = document.getElementById("embed-model-select");
     chatSel.innerHTML = "";
     embedSel.innerHTML = "";
-    // 对话模型：聚合所有已拉取 provider 的 chat 模型
     var chatOpts = [];
     Object.keys(providerModels).forEach(function (p) {
       providerModels[p].chat.forEach(function (x) {
@@ -477,7 +1789,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         o.textContent = "[" + (PROVIDER_META[x.provider] || {}).name + "] " + x.name;
         chatSel.appendChild(o);
       });
-      var cur = selection.chatProvider + "::" + selection.chatModel;
+      var cur = sel.chatProvider + "::" + sel.chatModel;
       if (chatOpts.some(function (x) { return x.provider + "::" + x.id === cur; })) {
         chatSel.value = cur;
       }
@@ -487,7 +1799,6 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       none.textContent = "先在上方配置 provider 并拉取模型";
       chatSel.appendChild(none);
     }
-    // 向量模型：聚合所有已拉取 provider 的 embedding 模型
     var embOpts = [];
     Object.keys(providerModels).forEach(function (p) {
       providerModels[p].embedding.forEach(function (x) {
@@ -504,10 +1815,10 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       o.textContent = "[" + (PROVIDER_META[x.provider] || {}).name + "] " + x.name;
       embedSel.appendChild(o);
     });
-    if (selection.embeddingProvider && selection.embeddingModel) {
-      var cur = selection.embeddingProvider + "::" + selection.embeddingModel;
-      if (embOpts.some(function (x) { return x.provider + "::" + x.id === cur; })) {
-        embedSel.value = cur;
+    if (sel.embeddingProvider && sel.embeddingModel) {
+      var curE = sel.embeddingProvider + "::" + sel.embeddingModel;
+      if (embOpts.some(function (x) { return x.provider + "::" + x.id === curE; })) {
+        embedSel.value = curE;
       }
     }
   }
@@ -532,12 +1843,11 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       }
       await trpc("llm.setSelection", payload);
       statusEl.textContent = "模型选择已保存";
+      toast("模型选择已保存");
     } catch (err) {
       errEl.textContent = err.message || "保存失败";
     }
   });
-
-  var selection = null;
 
   async function loadLlmConfig() {
     var errEl = document.getElementById("llm-error");
@@ -545,7 +1855,6 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       var cfg = await trpc("llm.getConfigs", {}, "GET");
       selection = cfg.selection;
       renderProviderList(cfg.providers);
-      // 自动拉取已配置 provider 的模型列表（填充选择下拉）
       var configured = cfg.providers.filter(function (p) { return p.apiKeyConfigured; });
       for (var i = 0; i < configured.length; i++) {
         var p = configured[i].provider;
@@ -563,91 +1872,65 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     }
   }
 
-  // ---- 书签 ----
-  document.getElementById("save-form").addEventListener("submit", async function (e) {
-    e.preventDefault();
-    var errEl = document.getElementById("save-error");
-    errEl.textContent = "";
+  // ---- 账户视图 ----
+  var SETTING_LABELS = {
+    bookmarkClickAction: { open_original_link: "打开原文", open_reader_view: "阅读视图" },
+    archiveDisplayBehaviour: { show: "显示归档", hide: "隐藏归档" }
+  };
+  function niceValue(key, v) {
+    var map = SETTING_LABELS[key];
+    return map && map[v] ? map[v] : (v == null || v === "" ? "—" : String(v));
+  }
+  async function loadAccount() {
     try {
-      await trpc("bookmarks.createBookmark", {
-        type: "link",
-        url: document.getElementById("save-url").value.trim(),
-        title: document.getElementById("save-title").value.trim() || null,
-        source: "web"
-      });
-      document.getElementById("save-url").value = "";
-      document.getElementById("save-title").value = "";
-      await loadBookmarks();
-      // 轮询等待标签生成（最多 60s，每 3s 一次），完成后自动刷新列表
-      var attempts = 0;
-      var timer = setInterval(async function () {
-        attempts++;
-        try {
-          var data = await trpc("bookmarks.getBookmarks", { limit: 50, archived: false }, "GET");
-          var pending = (data.bookmarks || []).some(function (b) { return b.taggingStatus === "pending"; });
-          if (!pending || attempts >= 20) {
-            clearInterval(timer);
-            await loadBookmarks();
-          }
-        } catch (err) {
-          clearInterval(timer);
-        }
-      }, 3000);
-    } catch (err) {
-      errEl.textContent = err.message || "保存失败";
-    }
-  });
+      if (!user) { user = await trpc("users.whoami", {}, "GET"); }
+      var name = user.name || "";
+      document.getElementById("user-avatar").textContent = (name || user.email || "?").charAt(0).toUpperCase();
+      document.getElementById("user-name").textContent = name || (user.email || "").split("@")[0] || "用户";
+      document.getElementById("user-mail").textContent = user.email || "";
+      document.getElementById("nav-bm-count").textContent = "";
 
-  async function loadBookmarks() {
-    var listEl = document.getElementById("bookmark-list");
-    listEl.innerHTML = '<div class="empty">加载中…</div>';
-    try {
-      var data = await trpc("bookmarks.getBookmarks", { limit: 50, archived: false }, "GET");
-      var bookmarks = data.bookmarks || [];
-      if (!bookmarks.length) {
-        listEl.innerHTML = '<div class="empty">暂无书签</div>';
-        return;
-      }
-      listEl.innerHTML = "";
-      bookmarks.forEach(function (bm) {
-        var div = document.createElement("div");
-        div.className = "bookmark";
-        var url = (bm.content && bm.content.url) || bm.url || "";
-        var title = bm.title || url || "(无标题)";
-        var date = bm.createdAt ? new Date(bm.createdAt).toLocaleString() : "";
-        var tags = (bm.tags || []).map(function (t) {
-          return '<span class="tag">' + escapeHtml(t.name) + "</span>";
-        }).join("");
-        var badge = "";
-        if (bm.taggingStatus === "pending") {
-          badge = '<span class="status-badge pending">生成中…</span>';
-        } else if (bm.taggingStatus === "failure") {
-          badge = '<span class="status-badge failure">生成失败</span>';
-        } else if (bm.taggingStatus === "success") {
-          badge = '<span class="status-badge success">已生成</span>';
-        }
-        div.innerHTML =
-          '<div class="title">' + escapeHtml(title) + badge + "</div>" +
-          (url ? '<div class="url"><a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + escapeHtml(url) + "</a></div>" : "") +
-          '<div class="meta">' + escapeHtml(date) + " " + tags + "</div>";
-        listEl.appendChild(div);
-      });
+      var init = (user.name || user.email || "U").charAt(0).toUpperCase();
+      var hero = document.getElementById("profile-hero");
+      hero.innerHTML =
+        '<div class="avatar-lg">' + esc(init) + "</div>" +
+        '<div style="min-width:0"><div class="ph-name">' + esc(name || "未命名") + "</div>" +
+        '<div class="ph-mail">' + esc(user.email || "") + "</div></div>" +
+        '<span class="ph-tag pill on">本机账户</span>';
+      document.getElementById("acc-name").textContent = name || "未命名";
+      document.getElementById("acc-email").textContent = user.email || "—";
+      document.getElementById("acc-id").textContent = user.id || "—";
+      document.getElementById("acc-click").textContent = "";
+      document.getElementById("acc-archive").textContent = "";
+      document.getElementById("acc-tz").textContent = "";
+      try {
+        var s = await trpc("users.settings", {}, "GET");
+        document.getElementById("acc-click").textContent = niceValue("bookmarkClickAction", s.bookmarkClickAction);
+        document.getElementById("acc-archive").textContent = niceValue("archiveDisplayBehaviour", s.archiveDisplayBehaviour);
+        document.getElementById("acc-tz").textContent = s.timezone || "—";
+        var backup = document.getElementById("acc-backup");
+        if (s.backupsEnabled) { backup.className = "pill on"; backup.textContent = "每周备份"; }
+        else { backup.className = "pill off"; backup.textContent = "未启用"; }
+      } catch (e) { /* 设置不可用不阻塞 */ }
     } catch (err) {
-      listEl.innerHTML = '<div class="empty">加载失败：' + escapeHtml(err.message || "未知错误") + "</div>";
+      /* 加载失败静默，下次进入重试 */
     }
   }
 
-  function escapeHtml(s) {
-    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
-      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
-    });
-  }
-
+  // ---- 启动 ----
   async function loadApp() {
     try {
       user = await trpc("users.whoami", {}, "GET");
+      var name = user.name || "";
+      document.getElementById("user-avatar").textContent = (name || user.email || "?").charAt(0).toUpperCase();
+      document.getElementById("user-name").textContent = name || (user.email || "").split("@")[0] || "用户";
+      document.getElementById("user-mail").textContent = user.email || "";
+      document.getElementById("nav-bm-count").textContent = "";
       showApp();
-      await loadBookmarks();
+      switchView("bookmarks");
+      await loadBookmarks(false);
+      await loadTagFilter();
+      startAutoRefresh();
     } catch (err) {
       apiKey = "";
       localStorage.removeItem("karaclone_api_key");

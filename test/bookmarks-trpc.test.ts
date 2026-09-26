@@ -147,3 +147,106 @@ describe("reader html", () => {
     expect(() => renderReaderHtml({ title: "x", url: "javascript:alert(1)", summary: null })).toThrow("READER_URL_INVALID");
   });
 });
+
+describe("bookmarks.updateTags（官方客户端添加/移除标签）", () => {
+  it("attach 按 tagName 新建标签并关联，detach 移除", async () => {
+    await seed();
+    const c = await caller();
+    const created = await c.bookmarks.createBookmark({
+      type: "link",
+      url: "https://example.com/tags-test",
+      title: "Tags Test",
+      source: "extension",
+    });
+
+    // 新建标签（扩展 Create 流程：attach 只传 tagName）
+    const res1 = await c.bookmarks.updateTags({
+      bookmarkId: created.id,
+      attach: [{ tagName: "  #新标签  " }],
+      detach: [],
+    });
+    expect(res1.attached).toHaveLength(1);
+    const tagRow = await env.DB.prepare("SELECT id, name FROM tags WHERE user_id = ? AND name = ?")
+      .bind(USER_ID, "新标签")
+      .first<{ id: string; name: string }>();
+    expect(tagRow).toBeTruthy();
+    expect(res1.attached[0]).toBe(tagRow!.id);
+
+    // 已存在标签按 tagId 再 attach（幂等）
+    const res2 = await c.bookmarks.updateTags({
+      bookmarkId: created.id,
+      attach: [{ tagId: tagRow!.id }],
+      detach: [],
+    });
+    expect(res2.attached).toHaveLength(1);
+
+    const links = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM bookmark_tags WHERE bookmark_id = ? AND tag_id = ?",
+    ).bind(created.id, tagRow!.id).first<{ n: number }>();
+    expect(links?.n).toBe(1);
+
+    // detach 移除
+    const res3 = await c.bookmarks.updateTags({
+      bookmarkId: created.id,
+      attach: [],
+      detach: [{ tagId: tagRow!.id }],
+    });
+    expect(res3.detached).toEqual([tagRow!.id]);
+    const after = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM bookmark_tags WHERE bookmark_id = ? AND tag_id = ?",
+    ).bind(created.id, tagRow!.id).first<{ n: number }>();
+    expect(after?.n).toBe(0);
+  });
+
+  it("attachedBy 默认 human，可指定 ai", async () => {
+    await seed();
+    const c = await caller();
+    const created = await c.bookmarks.createBookmark({
+      type: "link",
+      url: "https://example.com/tags-ai",
+      title: "Tags AI",
+      source: "extension",
+    });
+    await c.bookmarks.updateTags({
+      bookmarkId: created.id,
+      attach: [{ tagName: "ai标签", attachedBy: "ai" }],
+      detach: [],
+    });
+    const row = await env.DB.prepare(
+      "SELECT bt.attached_by FROM bookmark_tags bt JOIN tags t ON t.id = bt.tag_id WHERE bt.bookmark_id = ? AND t.name = 'ai标签'",
+    ).bind(created.id).first<{ attached_by: string }>();
+    expect(row?.attached_by).toBe("ai");
+  });
+
+  it("书签不存在时报错", async () => {
+    await seed();
+    const c = await caller();
+    await expect(
+      c.bookmarks.updateTags({ bookmarkId: "no_such_bm", attach: [{ tagName: "x" }], detach: [] }),
+    ).rejects.toThrow("BOOKMARK_NOT_FOUND");
+  });
+});
+
+describe("getBookmarks 排序", () => {
+  it("sortOrder desc 默认最新在前，asc 最旧在前", async () => {
+    await seed();
+    const c = await caller();
+    // 建 3 个不同时间的书签（直接插库控制 created_at）
+    const ids = [];
+    for (let i = 0; i < 3; i++) {
+      const id = crypto.randomUUID();
+      await env.DB.prepare(
+        "INSERT INTO bookmarks (id, user_id, canonical_url, title, archived, favourited, source, crawl_status, tagging_status, created_at) VALUES (?, ?, ?, ?, 0, 0, 'extension', 'success', 'success', ?)"
+      ).bind(id, USER_ID, "https://example.com/sort" + i, "Sort " + i, 1000 + i * 1000).run();
+      ids.push(id);
+    }
+    const desc = await c.bookmarks.getBookmarks({ sortOrder: "desc", limit: 10 });
+    const asc = await c.bookmarks.getBookmarks({ sortOrder: "asc", limit: 10 });
+    const descTitles = desc.bookmarks.filter(b => ids.includes(b.id)).map(b => b.title);
+    const ascTitles = asc.bookmarks.filter(b => ids.includes(b.id)).map(b => b.title);
+    expect(descTitles).toEqual(["Sort 2", "Sort 1", "Sort 0"]);
+    expect(ascTitles).toEqual(["Sort 0", "Sort 1", "Sort 2"]);
+    // 清理
+    await env.DB.prepare("DELETE FROM bookmarks WHERE id IN (?, ?, ?)").bind(...ids).run();
+  });
+});

@@ -16,7 +16,7 @@ import { runReplay } from "../scripts/phase0/replay-final-store.mjs";
 const CLIENTS = {
   profile: "clients",
   passed: true,
-  workerUrl: "https://karaclone-phase0.gowinder.workers.dev",
+  workerUrl: "https://karaclone.example.workers.dev",
   deploymentId: "feb1faea-6409-4ba7-a120-a094889b0417",
   versionIds: ["97be406d-c92c-4656-a592-e1c7b8018f28"],
   sourceDeploySha256: "2a8fa1c3bf3d01d7da21e6c56e5936e2cb2ea57161a73fd4e3709273a5cd7771",

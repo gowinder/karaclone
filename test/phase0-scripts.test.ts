@@ -18,7 +18,7 @@ import { join } from "node:path";
 const PROBES = {
   profile: "probes",
   passed: true,
-  workerUrl: "https://karaclone-phase0.gowinder.workers.dev",
+  workerUrl: "https://karaclone.example.workers.dev",
   deploymentId: "28d1e022-d7f6-4e3a-b477-0db20cc06d7d",
   versionIds: ["50d98bfb-70a1-4ef2-95ea-d939b01acf01"],
   sourceDeploySha256: "c09181f3d87c02bb4d4696cebb5b7f7fe39906badadc2fd8350a01de9099c67a",

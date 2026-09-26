@@ -17,6 +17,7 @@ import {
 import { handleQueueProbe } from "./phase0/queue-probe.js";
 import { handleAiProbe } from "./phase0/ai-probe.js";
 import { handleEnrichmentBatch } from "./queue/consumer.js";
+import { handleImportBatch } from "./queue/import-consumer.js";
 import { handleAssetUpload, handleAssetGet } from "./http/assets.js";
 import { handleDashboard } from "./http/dashboard.js";
 import { handleDlqBatch } from "./queue/dlq.js";
@@ -130,6 +131,10 @@ export default {
   async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
     if (batch.queue === "karaclone-phase0-enrichment-dlq") {
       await handleDlqBatch(env.DB, batch);
+      return;
+    }
+    if (batch.queue === "karaclone-phase0-import") {
+      await handleImportBatch(env.DB, batch, env);
       return;
     }
     await handleEnrichmentBatch(env.DB, batch, env);

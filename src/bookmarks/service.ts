@@ -43,6 +43,7 @@ export interface ListOptions {
   limit: number;
   cursor: Cursor | null;
   archived: boolean;
+  sortOrder: "asc" | "desc";
 }
 
 export interface ListResult {
@@ -152,8 +153,11 @@ export async function getBookmarks(
   userId: string,
   opts: ListOptions,
 ): Promise<ListResult> {
-  const { limit, cursor, archived } = opts;
+  const { limit, cursor, archived, sortOrder } = opts;
   const archivedInt = archived ? 1 : 0;
+  const asc = sortOrder === "asc";
+  const cmp = asc ? ">" : "<";
+  const order = asc ? "ASC" : "DESC";
 
   const select = `SELECT b.*, l.description, l.favicon
     FROM bookmarks b LEFT JOIN bookmark_links l ON l.id = b.id`;
@@ -162,14 +166,14 @@ export async function getBookmarks(
     const cursorMs = cursor.createdAt.getTime();
     rows = await db
       .prepare(
-        `${select} WHERE b.user_id = ? AND b.archived = ? AND ((b.created_at < ?) OR (b.created_at = ? AND b.id < ?)) ORDER BY b.created_at DESC, b.id DESC LIMIT ?`,
+        `${select} WHERE b.user_id = ? AND b.archived = ? AND ((b.created_at ${cmp} ?) OR (b.created_at = ? AND b.id ${cmp} ?)) ORDER BY b.created_at ${order}, b.id ${order} LIMIT ?`,
       )
       .bind(userId, archivedInt, cursorMs, cursorMs, cursor.id, limit + 1)
       .all<BookmarkDbRow>()
       .then((r) => (r.results ?? []) as BookmarkDbRow[]);
   } else {
     rows = await db
-      .prepare(`${select} WHERE b.user_id = ? AND b.archived = ? ORDER BY b.created_at DESC, b.id DESC LIMIT ?`)
+      .prepare(`${select} WHERE b.user_id = ? AND b.archived = ? ORDER BY b.created_at ${order}, b.id ${order} LIMIT ?`)
       .bind(userId, archivedInt, limit + 1)
       .all<BookmarkDbRow>()
       .then((r) => (r.results ?? []) as BookmarkDbRow[]);

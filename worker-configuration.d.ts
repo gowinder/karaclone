@@ -4,6 +4,7 @@
 interface __BaseEnv_Env {
 	DB: D1Database;
 	ENRICHMENT_QUEUE: Queue;
+	IMPORT_QUEUE: Queue;
 	AI: Ai;
 	SERVER_VERSION: "0.1.0";
 	AI_MODEL: "@cf/meta/llama-3.1-8b-instruct-fast";

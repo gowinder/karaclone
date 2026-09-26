@@ -10,6 +10,8 @@ export type OpenAiCompatibleRequest = {
   /** 相对端点，默认 chat/completions；Ollama Cloud 传 v1/chat/completions */
   endpoint?: string;
   fetchImpl?: typeof fetch;
+  /** 请求超时毫秒，默认 60000 */
+  timeoutMs?: number;
 };
 
 export async function runOpenAiCompatible(req: OpenAiCompatibleRequest): Promise<string> {
@@ -27,6 +29,7 @@ export async function runOpenAiCompatible(req: OpenAiCompatibleRequest): Promise
       messages: req.messages,
       stream: false,
     }),
+    signal: AbortSignal.timeout(req.timeoutMs ?? 60000),
   });
   if (!res.ok) {
     const text = await res.text();

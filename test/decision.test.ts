@@ -23,7 +23,7 @@ const ACCOUNT_SHA = "bef40fdf3e1c552e900d60686f364aa0f847a5ce4e2066a44e094b2ef14
 const PROBES = {
   profile: "probes",
   passed: true,
-  workerUrl: "https://karaclone-phase0.gowinder.workers.dev",
+  workerUrl: "https://karaclone.example.workers.dev",
   deploymentId: "feb1faea-6409-4ba7-a120-a094889b0417",
   versionIds: ["97be406d-c92c-4656-a592-e1c7b8018f28"],
   sourceDeploySha256: "2a8fa1c3bf3d01d7da21e6c56e5936e2cb2ea57161a73fd4e3709273a5cd7771",
@@ -36,7 +36,7 @@ const PROBES = {
 const CLIENTS = {
   profile: "clients",
   passed: true,
-  workerUrl: "https://karaclone-phase0.gowinder.workers.dev",
+  workerUrl: "https://karaclone.example.workers.dev",
   deploymentId: "feb1faea-6409-4ba7-a120-a094889b0417",
   versionIds: ["97be406d-c92c-4656-a592-e1c7b8018f28"],
   sourceDeploySha256: "2a8fa1c3bf3d01d7da21e6c56e5936e2cb2ea57161a73fd4e3709273a5cd7771",
@@ -44,7 +44,7 @@ const CLIENTS = {
 const CPU = {
   profile: "cpu",
   passed: true,
-  workerUrl: "https://karaclone-phase0.gowinder.workers.dev",
+  workerUrl: "https://karaclone.example.workers.dev",
   deploymentId: "feb1faea-6409-4ba7-a120-a094889b0417",
   versionIds: ["97be406d-c92c-4656-a592-e1c7b8018f28"],
   sourceDeploySha256: "2a8fa1c3bf3d01d7da21e6c56e5936e2cb2ea57161a73fd4e3709273a5cd7771",
@@ -56,7 +56,7 @@ const CPU = {
 const CLEANUP = {
   profile: "cleanup",
   passed: true,
-  workerUrl: "https://karaclone-phase0.gowinder.workers.dev",
+  workerUrl: "https://karaclone.example.workers.dev",
   deploymentId: "cleanup-deploy-1",
   versionIds: ["cleanup-version-1"],
   sourceDeploySha256: "2a8fa1c3bf3d01d7da21e6c56e5936e2cb2ea57161a73fd4e3709273a5cd7771",

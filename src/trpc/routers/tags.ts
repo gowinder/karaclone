@@ -42,16 +42,18 @@ export const tagsRouter = router({
       const offset = (input.cursor?.page ?? 0) * limit;
       params.push(limit, offset);
 
+      const orderBy =
+        input.sortBy === "usage"
+          ? "num_bookmarks DESC, t.name ASC"
+          : "t.name ASC";
+
       const rows = await ctx.env.DB.prepare(
-        `SELECT t.id, t.name,
-          COUNT(bt.bookmark_id) AS num_bookmarks,
-          SUM(CASE WHEN bt.attached_by = 'ai' THEN 1 ELSE 0 END) AS num_ai,
-          SUM(CASE WHEN bt.attached_by = 'human' THEN 1 ELSE 0 END) AS num_human
+        `SELECT t.id, t.name, t.num_bookmarks,
+          (SELECT COUNT(*) FROM bookmark_tags bt WHERE bt.tag_id = t.id AND bt.attached_by = 'ai') AS num_ai,
+          (SELECT COUNT(*) FROM bookmark_tags bt WHERE bt.tag_id = t.id AND bt.attached_by = 'human') AS num_human
         FROM tags t
-        LEFT JOIN bookmark_tags bt ON bt.tag_id = t.id
         ${where}
-        GROUP BY t.id, t.name
-        ORDER BY t.name ASC
+        ORDER BY ${orderBy}
         LIMIT ? OFFSET ?`,
       )
         .bind(...params)

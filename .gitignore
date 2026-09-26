@@ -55,6 +55,7 @@ Thumbs.db
 .cache/
 .tmp/
 
-# KaraClone Phase 0
+# KaraClone Phase 0 evidence (development-only, not published)
 .phase0/
-artifacts/phase0/*.secret
+artifacts/phase0/*
+!artifacts/phase0/.gitkeep

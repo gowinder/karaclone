@@ -5,7 +5,7 @@
  * 进程退出码：GO=0、NO-GO=2、证据解析错误=3。
  *
  * 用户豁免（三次，如实记录）：
- * 1. Gowinder 账户 3 个 Paid 订阅与项目无关，preflight passed=false 允许继续；
+ * 1. 账户存在 3 个与本项目无关的 Paid 订阅，preflight passed=false 允许继续；
  * 2. Queue retention 实际 345600 秒（4 天）非 Free 24 小时，用户批准忽略，按 24 小时假设继续；
  * 3. entitlement 三件套跳过（collector 代码保留在仓库但不再运行）。
  *
@@ -168,7 +168,7 @@ export async function decide({
       evidence.g0Exemption = {
         preflightPassed: pre.passed,
         subscriptionRiskFree: pre.subscriptionRiskFree,
-        exemption: "Gowinder 账户 3 个 Paid 订阅与项目无关，用户批准忽略",
+        exemption: "账户存在 3 个与本项目无关的 Paid 订阅，用户批准忽略",
       };
       evidence.g0AccountIdSha256 = pre.whoamiAccountIdSha256;
     }
@@ -469,7 +469,7 @@ export async function decide({
       mobile: "1.11.0",
     },
     exemptions: [
-      { gate: "G0", note: "Gowinder 账户 3 个 Paid 订阅与项目无关，preflight passed=false 允许继续" },
+      { gate: "G0", note: "账户存在 3 个与本项目无关的 Paid 订阅，preflight passed=false 允许继续" },
       { gate: "G2", note: "Queue retention 实际 345600 秒（4 天）非 Free 24 小时，用户批准忽略，按 24 小时假设继续" },
       { gate: "G0", note: "entitlement 三件套跳过（collector 代码保留在仓库但不再运行）" },
     ],

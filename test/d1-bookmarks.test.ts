@@ -10,7 +10,7 @@ const API_KEY_ID = "ak_1";
 
 async function seedUser() {
   await env.DB.prepare("INSERT OR IGNORE INTO users (id, name, email, created_at) VALUES (?, ?, ?, ?)")
-    .bind(USER_ID, "Gowinder", "gowinder@example.com", Date.now())
+    .bind(USER_ID, "Test User", "user@example.com", Date.now())
     .run();
   await env.DB.prepare("INSERT OR IGNORE INTO api_keys (id, user_id, key_id, secret_hash, name, scope, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
     .bind(API_KEY_ID, USER_ID, "k1", "deadbeef", "test key", "fullaccess", Date.now())
@@ -45,7 +45,7 @@ describe("D1 bookmark 契约", () => {
   it("用户/key 插入", async () => {
     await seedUser();
     const user = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(USER_ID).first();
-    expect(user?.email).toBe("gowinder@example.com");
+    expect(user?.email).toBe("user@example.com");
     const key = await env.DB.prepare("SELECT * FROM api_keys WHERE id = ?").bind(API_KEY_ID).first();
     expect(key?.scope).toBe("fullaccess");
   });

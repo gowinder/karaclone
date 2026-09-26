@@ -35,7 +35,8 @@
   },
   "queues": {
     "producers": [
-      { "binding": "ENRICHMENT_QUEUE", "queue": "karaclone-phase0-enrichment" }
+      { "binding": "ENRICHMENT_QUEUE", "queue": "karaclone-phase0-enrichment" },
+      { "binding": "IMPORT_QUEUE", "queue": "karaclone-phase0-import" }
     ],
     "consumers": [
       {
@@ -50,6 +51,12 @@
         "max_batch_size": 1,
         "max_batch_timeout": 1,
         "max_retries": 0
+      },
+      {
+        "queue": "karaclone-phase0-import",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 3
       }
     ]
   }

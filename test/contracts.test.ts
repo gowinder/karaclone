@@ -84,8 +84,8 @@ const clientConfigFixture = {
 
 const whoAmIFixture = {
   id: "user_1",
-  name: "Gowinder",
-  email: "gowinder@example.com",
+  name: "Test User",
+  email: "user@example.com",
   image: null,
   localUser: true,
 };

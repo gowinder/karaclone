@@ -151,11 +151,11 @@ async function makeStoreEvidenceWithScreenshot(tmpDir: string, extensionId: stri
 describe("redactToolOutput", () => {
   it("只保留验证相关行", () => {
     const out = redactToolOutput(
-      "Verifies\nSigner #1 certificate SHA-256 digest:\n0A:9F:4A:6B:90:0B:DA:E4:D4:AD:7E:F3:E7:D7:73:90:1D:87:08:84:1A:DB:29:4C:49:4B:18:2A:1E:81:C3:D9\nWarning: /Users/gowinder/secret\n",
+      "Verifies\nSigner #1 certificate SHA-256 digest:\n0A:9F:4A:6B:90:0B:DA:E4:D4:AD:7E:F3:E7:D7:73:90:1D:87:08:84:1A:DB:29:4C:49:4B:18:2A:1E:81:C3:D9\nWarning: /Users/example/secret\n",
     );
     expect(out).toContain("Signer #1 certificate SHA-256 digest:");
     expect(out).toContain("0A:9F:4A:6B");
-    expect(out).not.toContain("/Users/gowinder");
+    expect(out).not.toContain("/Users/example");
     expect(out).not.toContain("secret");
   });
 });

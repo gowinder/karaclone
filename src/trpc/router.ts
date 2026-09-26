@@ -9,6 +9,7 @@ import { rulesRouter } from "./routers/rules.js";
 import { tagsRouter } from "./routers/tags.js";
 import { llmRouter } from "./routers/llm.js";
 import { usersRouter } from "./routers/users.js";
+import { importsRouter } from "./routers/imports.js";
 
 export const appRouter = router({
   config: configRouter,
@@ -21,6 +22,7 @@ export const appRouter = router({
   tags: tagsRouter,
   llm: llmRouter,
   assets: assetsRouter,
+  imports: importsRouter,
 });
 
 export type AppRouter = typeof appRouter;
