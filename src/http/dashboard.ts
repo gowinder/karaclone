@@ -993,6 +993,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     tagFilterTags: null,    // 标签筛选栏的标签
     tagFilterTotal: 0,      // 标签总数（用于「展开全部」）
     tagFilterLoadedAll: false, // 是否已把全部分页拉完
+    tagFilterLoadFailed: false, // 上次全量拉取是否失败（用于按钮文案与重试）
     tagFilterExpanded: false,  // 当前是否处于展开态（与「已加载全部」是两件事）
     refreshTimer: null
   };
@@ -1178,15 +1179,35 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     } catch (e) { /* 候选加载失败不阻塞 */ }
   }
 
+  // 拉取当前 offset 的一页。若 offset 越界（例如停在第 3 页时书签被删到只剩 2 页），
+  // 收敛到最后一页的起点并重试一次；total 为 0 时把 offset 归零。
+  // 收敛只做一次：目标 offset 与当前相同时不再重试，避免递归。
+  async function fetchBookmarksPage() {
+    var data = await trpc("bookmarks.getBookmarks", buildQuery(), "GET");
+    var list = data.bookmarks || [];
+    var total = typeof data.total === "number" ? data.total : list.length;
+    if (total === 0) {
+      state.offset = 0;
+    } else if (!list.length && state.offset > 0) {
+      var lastOffset = Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE;
+      if (lastOffset !== state.offset) {
+        state.offset = lastOffset;
+        data = await trpc("bookmarks.getBookmarks", buildQuery(), "GET");
+        list = data.bookmarks || [];
+        total = typeof data.total === "number" ? data.total : list.length;
+      }
+    }
+    state.total = total;
+    state.hasMore = state.offset + list.length < state.total;
+    return list;
+  }
+
   // keepPage: false = 回到第 1 页；true = 保持当前 offset
   async function loadBookmarks(keepPage) {
     if (!keepPage) state.offset = 0;
     renderSkeleton();
     try {
-      var data = await trpc("bookmarks.getBookmarks", buildQuery(), "GET");
-      var list = data.bookmarks || [];
-      state.total = typeof data.total === "number" ? data.total : list.length;
-      state.hasMore = state.offset + list.length < state.total;
+      var list = await fetchBookmarksPage();
       renderBookmarks(list);
       updateCountLabel();
       updatePagination();
@@ -1282,8 +1303,15 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       state.tagFilterTags = data.tags || [];
       state.tagFilterTotal = typeof data.total === "number" ? data.total : state.tagFilterTags.length;
       state.tagFilterLoadedAll = false;
+      state.tagFilterLoadFailed = false;
       if (wasExpanded) {
-        await loadAllTagFilterPages();
+        var ok = await loadAllTagFilterPages();
+        if (!ok) {
+          // 全量拉取失败：退回折叠态，保留首屏标签，按钮仍可点以重试
+          state.tagFilterLoadFailed = true;
+          state.tagFilterExpanded = false;
+        }
+        renderTagFilter();
         return;
       }
       renderTagFilter();
@@ -1292,22 +1320,28 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 
   // 幂等重建：每次都从 page 0 重新翻完所有分页，累积到局部数组后整体替换。
   // 反复调用不会重复追加（早期版本往 state.tagFilterTags 上 concat，展开→收起→再展开会翻倍）。
+  // 任意一页失败或翻页上限用尽都算整体失败：此时不改动 state、不标记已加载全部，
+  // 保留此前已渲染的标签，由调用方决定是否重试。返回 true 表示全量拉取成功。
   async function loadAllTagFilterPages() {
     var acc = [];
     var page = 0;
     var guard = 0;
+    var complete = false;
     try {
       while (guard++ < 100) {
         var d = await trpc("tags.list", { limit: 100, sortBy: "usage", cursor: { page: page } }, "GET");
         var batch = d.tags || [];
         if (batch.length) acc = acc.concat(batch);
-        if (!d.nextCursor) break;
+        if (!d.nextCursor) { complete = true; break; }
         page = d.nextCursor.page;
       }
-    } catch (e) { /* 加载失败不阻塞 */ }
+    } catch (e) { /* 任意一页失败都按整体失败处理 */ }
+    if (!complete) return false;
     state.tagFilterTags = acc;
     state.tagFilterLoadedAll = true;
+    state.tagFilterLoadFailed = false;
     renderTagFilter();
+    return true;
   }
 
   function renderTagFilter() {
@@ -1328,7 +1362,9 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       var more = document.createElement("button");
       more.className = "tag-chip tag-more";
       more.id = "tag-filter-more";
-      more.textContent = expanded ? "收起" : "展开全部（共 " + state.tagFilterTotal + " 个标签）";
+      more.textContent = state.tagFilterLoadFailed
+        ? "加载失败，点击重试"
+        : expanded ? "收起" : "展开全部（共 " + state.tagFilterTotal + " 个标签）";
       more.addEventListener("click", async function () {
         if (state.tagFilterExpanded) {
           // 只收起，已加载的全量数据保留在 state.tagFilterTags 里
@@ -1339,7 +1375,15 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         if (!state.tagFilterLoadedAll) {
           more.disabled = true;
           more.textContent = "加载中…";
-          await loadAllTagFilterPages(); // 内部会 render 一次
+          var ok = await loadAllTagFilterPages(); // 成功时内部会 render 一次
+          if (!ok) {
+            // 失败：不进入展开态，保留已渲染的标签，按钮恢复可点以便重试
+            state.tagFilterLoadFailed = true;
+            state.tagFilterExpanded = false;
+            renderTagFilter();
+            return;
+          }
+          state.tagFilterLoadFailed = false;
         }
         // 必须放在 loadAllTagFilterPages 之后，否则中间态会先闪成收起
         state.tagFilterExpanded = true;
@@ -1581,10 +1625,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     state.refreshTimer = setInterval(async function () {
       if (document.getElementById("bookmarks-view").classList.contains("hidden")) return;
       try {
-        var data = await trpc("bookmarks.getBookmarks", buildQuery(), "GET");
-        var list = data.bookmarks || [];
-        state.total = typeof data.total === "number" ? data.total : list.length;
-        state.hasMore = state.offset + list.length < state.total;
+        var list = await fetchBookmarksPage();
         renderBookmarks(list);
         updateCountLabel();
         updatePagination();

@@ -31,7 +31,7 @@ describe("client bootstrap", () => {
   it("config.clientConfig 匿名可访问且字段锁定", async () => {
     const c = await caller();
     const clientConfig = await c.config.clientConfig();
-    expect(clientConfig.serverVersion).toBe("0.2.1");
+    expect(clientConfig.serverVersion).toBe("0.2.2");
     expect(clientConfig.publicApiUrl).toBe("https://example.com");
     expect(clientConfig.inference).toMatchObject({ isConfigured: true, inferredTagLang: "zh-CN" });
     expect(clientConfig.auth).toMatchObject({ disableSignups: true, disablePasswordAuth: true });
