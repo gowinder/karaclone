@@ -185,7 +185,8 @@ describe("tags.list", () => {
     const { key } = await c.apiKeys.exchange({ keyName: "K", email: "emptytags@test.com", password: "password123" });
     const authed = await caller(key);
     const res = await authed.tags.list({});
-    expect(res).toEqual({ tags: [], nextCursor: null });
+    // total 是 karaclone 给仪表盘标签筛选器加的扩展字段
+    expect(res).toEqual({ tags: [], nextCursor: null, total: 0 });
   });
 
   it("返回用户标签及书签计数", async () => {

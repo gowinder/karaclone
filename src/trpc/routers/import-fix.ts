@@ -4,7 +4,14 @@ import { z } from "zod";
 import { canonicalizeUrl } from "../../url/canonicalize.js";
 import { decryptSecret } from "../../auth/secret-box.js";
 import { runOpenAiCompatible } from "../../ai/openai-compatible.js";
+import { unwrapWorkersAiOutput } from "../../ai/cloudflare-ai.js";
+import { isLlmProvider, resolveProviderRequest } from "../../ai/providers.js";
 import { fetchPageMeta } from "../../bookmarks/page-meta.js";
+import {
+  listRetryableTagging,
+  requeueFailedTagging,
+  type EnrichmentSender,
+} from "../../bookmarks/retag.js";
 import { fetchAllBookmarks } from "./imports.js";
 
 const CONCURRENCY = 5;
@@ -46,7 +53,8 @@ async function translateTagBatch(
 
   let raw: unknown;
   if (sel.chat_provider === "workers-ai") {
-    raw = await env.AI.run(sel.chat_model, {
+    // 与 queue consumer 同路径：Workers AI 返回 { response } / { choices }，先解包再解析
+    raw = unwrapWorkersAiOutput(await env.AI.run(sel.chat_model, {
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: JSON.stringify(batch) },
@@ -72,22 +80,23 @@ async function translateTagBatch(
           additionalProperties: false,
         },
       },
-    });
+    }));
   } else {
     if (!cfg?.api_key_enc || !env.LLM_CONFIG_KEY) return null;
+    if (!isLlmProvider(sel.chat_provider)) throw new Error(`unknown llm provider: ${sel.chat_provider}`);
     const apiKey = await decryptSecret(cfg.api_key_enc, env.LLM_CONFIG_KEY);
-    const baseUrl =
-      cfg.base_url ?? (sel.chat_provider === "openrouter" ? "https://openrouter.ai/api/v1" : "https://ollama.com");
-    const endpoint = sel.chat_provider === "ollama-cloud" ? "v1/chat/completions" : "chat/completions";
+    // 默认地址与端点统一从 PROVIDER_ENDPOINTS 取（禁止二元表达式兜底到 Ollama）
+    const req = resolveProviderRequest(sel.chat_provider, cfg.base_url, userId);
     raw = await runOpenAiCompatible({
-      baseUrl,
+      baseUrl: req.baseUrl,
       apiKey,
       model: sel.chat_model,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: JSON.stringify(batch) },
       ],
-      endpoint,
+      endpoint: req.endpoint,
+      headers: req.headers,
       fetchImpl,
       // 单批 120s 超时：ollama-cloud 慢响应时快速失败，由调用方跳过该批继续
       timeoutMs: 120000,
@@ -309,5 +318,69 @@ export async function runTranslateJob(
   await db
     .prepare("UPDATE import_jobs SET status = 'success', imported = ?, skipped = ?, failed = ?, processed = ?, updated_at = ? WHERE id = ?")
     .bind(0, translated, failed, translated, Date.now(), jobId)
+    .run();
+}
+
+// 每批重新入队的书签数：逐条 send 队列消息，25 条/批兼顾进度可见性与失败影响面。
+const RETRY_TAGGING_BATCH = 25;
+
+// 后台执行「重试失败标签」：把打标签失败或从未打过标签的书签重新入队到 enrichment 队列。
+// 这里只负责入队（total=可重试总数、imported=成功入队数、skipped=已有活跃 job、
+// failed=入队失败数）；真正的打标签由 enrichment consumer 异步完成，并在执行时读取
+// 用户当前保存的模型配置，因此换模型后重试即用新模型。
+export async function runRetryTaggingJob(
+  db: D1Database,
+  jobId: string,
+  userId: string,
+  queue: EnrichmentSender,
+): Promise<void> {
+  await db
+    .prepare("UPDATE import_jobs SET status = 'running', updated_at = ? WHERE id = ?")
+    .bind(Date.now(), jobId)
+    .run();
+
+  const failedBookmarks = await listRetryableTagging(db, userId);
+  const total = failedBookmarks.length;
+
+  let requeued = 0;
+  let skipped = 0;
+  let sendFailed = 0;
+
+  for (let i = 0; i < total; i += RETRY_TAGGING_BATCH) {
+    const batch = failedBookmarks.slice(i, i + RETRY_TAGGING_BATCH);
+    const outcomes = await Promise.all(
+      batch.map((bm) => requeueFailedTagging(db, queue, userId, bm)),
+    );
+    for (const o of outcomes) {
+      if (o.requeued) requeued++;
+      else if (o.skipped) skipped++;
+      else sendFailed++;
+    }
+    const done = Math.min(i + RETRY_TAGGING_BATCH, total);
+    await db
+      .prepare(
+        "UPDATE import_jobs SET total = ?, imported = ?, skipped = ?, failed = ?, processed = ?, updated_at = ? WHERE id = ?",
+      )
+      .bind(total, requeued, skipped, sendFailed, done, Date.now(), jobId)
+      .run();
+  }
+
+  // 全部入队失败（如队列绑定异常）→ 任务置 failed，面板直接显示原因
+  const allEnqueueFailed = total > 0 && requeued === 0 && sendFailed > 0;
+  await db
+    .prepare(
+      "UPDATE import_jobs SET status = ?, total = ?, imported = ?, skipped = ?, failed = ?, processed = ?, error = ?, updated_at = ? WHERE id = ?",
+    )
+    .bind(
+      allEnqueueFailed ? "failed" : "success",
+      total,
+      requeued,
+      skipped,
+      sendFailed,
+      total,
+      allEnqueueFailed ? `重新入队失败：${sendFailed} 条` : null,
+      Date.now(),
+      jobId,
+    )
     .run();
 }

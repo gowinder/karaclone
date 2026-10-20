@@ -78,7 +78,7 @@ const clientConfigFixture = {
   search: { semanticSearchEnabled: false },
   stripe: { isConfigured: false },
   legal: {},
-  serverVersion: "0.1.0",
+  serverVersion: "0.2.0",
   disableNewReleaseCheck: true,
 };
 

@@ -4,16 +4,23 @@
 // 重试耗尽后任务置 failed（断点保留，可手动重试续传）。
 import { decryptSecret } from "../auth/secret-box.js";
 import { runImportJob } from "../trpc/routers/imports.js";
-import { runFixJob, runRetagJob, runTranslateJob } from "../trpc/routers/import-fix.js";
+import {
+  runFixJob,
+  runRetagJob,
+  runRetryTaggingJob,
+  runTranslateJob,
+} from "../trpc/routers/import-fix.js";
 
 const RETRY_DELAYS = [30, 300, 1800] as const;
+
+export type ImportJobKind = "import" | "fix" | "retag" | "translate" | "retry-tagging";
 
 export interface ImportQueueMessage {
   jobId: string;
   userId: string;
   sourceUrl: string;
   apiKeyEnc: string;
-  kind?: "import" | "fix" | "retag" | "translate";
+  kind?: ImportJobKind;
 }
 
 export function parseImportQueueMessage(input: unknown): ImportQueueMessage {
@@ -62,6 +69,9 @@ export async function handleImportBatch(
       } else if (msg.kind === "translate") {
         // 维护任务：仅翻译标签，无需源 API key
         await runTranslateJob(db, msg.jobId, msg.userId, env, opts);
+      } else if (msg.kind === "retry-tagging") {
+        // 维护任务：把打标签失败的书签重新入队到 enrichment 队列
+        await runRetryTaggingJob(db, msg.jobId, msg.userId, env.ENRICHMENT_QUEUE);
       } else {
         const apiKey = await decryptSecret(msg.apiKeyEnc, env.LLM_CONFIG_KEY);
         await runImportJob(db, msg.jobId, msg.userId, msg.sourceUrl, apiKey, opts);

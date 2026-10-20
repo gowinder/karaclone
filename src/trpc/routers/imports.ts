@@ -4,6 +4,7 @@ import { canonicalizeUrl } from "../../url/canonicalize.js";
 import { encryptSecret, decryptSecret } from "../../auth/secret-box.js";
 import { runOpenAiCompatible } from "../../ai/openai-compatible.js";
 import { fetchPageMeta } from "../../bookmarks/page-meta.js";
+import { countRetryableTagging, latestTaggingFailure } from "../../bookmarks/retag.js";
 
 // 从其他 Karakeep 实例导入书签与标签（后台任务）。
 // 流程：startImportJob 同步 exchange 换 key（立即验证凭据）→ 建 import_jobs 记录 →
@@ -31,7 +32,7 @@ const zImportJobSchema = z.object({
   id: z.string(),
   sourceUrl: z.string(),
   email: z.string(),
-  kind: z.enum(["import", "fix", "retag", "translate"]),
+  kind: z.enum(["import", "fix", "retag", "translate", "retry-tagging"]),
   status: z.enum(["pending", "running", "success", "failed"]),
   total: z.number(),
   imported: z.number(),
@@ -384,7 +385,7 @@ function mapJobRow(row: {
     id: row.id,
     sourceUrl: row.source_url,
     email: row.email,
-    kind: row.kind as "import" | "fix" | "retag" | "translate",
+    kind: row.kind as "import" | "fix" | "retag" | "translate" | "retry-tagging",
     status: row.status as "pending" | "running" | "success" | "failed",
     total: row.total,
     imported: row.imported,
@@ -498,6 +499,8 @@ export const importsRouter = router({
         userId: row.user_id,
         sourceUrl: row.source_url,
         apiKeyEnc: row.api_key_enc,
+        // 维护任务重试时必须带上 kind：否则 consumer 会按普通导入任务处理
+        ...(row.kind === "import" ? {} : { kind: row.kind }),
       });
       return mapJobRow({ ...row, status: "pending", error: null, updated_at: now });
     }),
@@ -615,6 +618,83 @@ export const importsRouter = router({
         kind: input.kind,
         status: "pending",
         total: 0,
+        imported: 0,
+        skipped: 0,
+        failed: 0,
+        error: null,
+        created_at: now,
+        updated_at: now,
+      });
+    }),
+
+  // 可重试的标签数量与构成 + 最近一次失败原因：面板「重试失败标签」按钮的
+  // 徽标、禁用态与失败原因展示依据。范围含「失败」与「从未打过标签」两类。
+  failedTaggingCount: protectedProcedure
+    .output(
+      z.object({
+        count: z.number(),
+        failed: z.number(),
+        neverTagged: z.number(),
+        stuck: z.number(),
+        recentFailure: z
+          .object({ code: z.string().nullable(), message: z.string(), at: z.date() })
+          .nullable(),
+      }),
+    )
+    .query(async ({ ctx }) => {
+      const [counts, recentFailure] = await Promise.all([
+        countRetryableTagging(ctx.env.DB, ctx.user.id),
+        latestTaggingFailure(ctx.env.DB, ctx.user.id),
+      ]);
+      return {
+        count: counts.total,
+        failed: counts.failed,
+        neverTagged: counts.neverTagged,
+        stuck: counts.stuck,
+        recentFailure,
+      };
+    }),
+
+  // 重试失败标签（维护任务）：把 tagging_status='failure' 的书签重新入队到
+  // enrichment 队列。真正的打标签由 enrichment consumer 异步执行，并在执行时读取
+  // 用户当前保存的模型配置，因此换模型后点此按钮即用新模型重跑。
+  retryFailedTagging: protectedProcedure
+    .output(zImportJobSchema)
+    .mutation(async ({ ctx }) => {
+      const counts = await countRetryableTagging(ctx.env.DB, ctx.user.id);
+      if (counts.total === 0) throw new Error("当前没有需要重试标签的书签，无需重试");
+
+      // 维护任务不依赖源实例：复用最近一次终态导入任务的占位字段（无则空串）。
+      // retry-tagging 在 consumer 中不解密 api_key_enc，空串安全。
+      const last = await ctx.env.DB.prepare(
+        "SELECT source_url, email, api_key_enc FROM import_jobs WHERE user_id = ? AND kind = 'import' AND status IN ('success', 'failed') ORDER BY created_at DESC LIMIT 1",
+      )
+        .bind(ctx.user.id)
+        .first<{ source_url: string; email: string; api_key_enc: string }>();
+
+      const id = crypto.randomUUID();
+      const now = Date.now();
+      await ctx.env.DB.prepare(
+        "INSERT INTO import_jobs (id, user_id, source_url, email, api_key_enc, kind, status, total, imported, skipped, failed, error, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'retry-tagging', 'pending', 0, 0, 0, 0, NULL, ?, ?)",
+      )
+        .bind(id, ctx.user.id, last?.source_url ?? "", last?.email ?? "", last?.api_key_enc ?? "", now, now)
+        .run();
+
+      await ctx.env.IMPORT_QUEUE.send({
+        jobId: id,
+        userId: ctx.user.id,
+        sourceUrl: last?.source_url ?? "",
+        apiKeyEnc: last?.api_key_enc ?? "",
+        kind: "retry-tagging",
+      });
+
+      return mapJobRow({
+        id,
+        source_url: last?.source_url ?? "",
+        email: last?.email ?? "",
+        kind: "retry-tagging",
+        status: "pending",
+        total: counts.total,
         imported: 0,
         skipped: 0,
         failed: 0,

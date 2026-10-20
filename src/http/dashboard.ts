@@ -297,10 +297,14 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .tag-chip.active { background:var(--accent-soft); border-color:var(--accent); color:var(--accent-strong); font-weight:550; }
   .tag-chip .cnt { font-size:10.5px; color:var(--text-3); font-variant-numeric:tabular-nums; }
   .tag-chip.active .cnt { color:var(--accent-strong); opacity:.7; }
+  .tag-filter.expanded { max-height:240px; overflow-y:auto; padding-right:4px; }
+  .tag-chip.tag-more { color:var(--accent-strong); border-style:dashed; }
 
   /* 分页 / 空态 / 骨架 */
-  .pagination { display:flex; align-items:center; justify-content:center; gap:12px; margin-top:18px; }
+  .pagination { display:flex; align-items:center; justify-content:center; gap:12px; margin-top:18px; flex-wrap:wrap; }
   .page-info { font-size:12.5px; color:var(--text-3); font-variant-numeric:tabular-nums; }
+  .page-jump-wrap { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:var(--text-3); }
+  .page-jump { width:64px; height:26px; padding:0 8px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text); font-size:12.5px; font-family:inherit; }
   .empty {
     color:var(--text-3); text-align:center; padding:52px 20px; font-size:14px;
     background:var(--surface); border:1px dashed var(--border-strong); border-radius:var(--radius-lg);
@@ -323,8 +327,15 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   .panel > .p-desc { font-size:12.5px; color:var(--text-3); margin-bottom:16px; }
   .panel .field { margin-bottom:12px; }
   .panel .field > input { padding:9px 12px; border-radius:10px; }
-  .mtn-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .mtn-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
   @media (max-width:640px) { .mtn-grid { grid-template-columns:1fr; } }
+  .mtn-grid .btn { position:relative; }
+  .mtn-count {
+    display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px;
+    padding:0 5px; margin-left:6px; border-radius:999px; font-size:11px; font-weight:600;
+    background:var(--danger-soft); color:var(--danger);
+  }
+  .mtn-grid .btn:disabled { opacity:.5; cursor:not-allowed; }
   .job-list { display:flex; flex-direction:column; }
   .job {
     display:flex; align-items:center; gap:12px; padding:12px 0;
@@ -541,7 +552,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="u-mail" id="user-mail"></div>
         </div>
       </div>
-      <div class="ver" id="app-version">v0.2.0</div>
+      <div class="ver" id="app-version">v__SERVER_VERSION__</div>
     </div>
   </aside>
 
@@ -606,6 +617,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           <button class="btn secondary sm" id="prev-page">上一页</button>
           <span class="page-info" id="page-info"></span>
           <button class="btn secondary sm" id="next-page">下一页</button>
+          <span class="page-jump-wrap">跳至 <input id="page-jump" class="page-jump" type="number" min="1" value="1"> 页 <button class="btn secondary sm" id="page-jump-go">跳转</button></span>
         </div>
       </section>
 
@@ -641,7 +653,11 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
               <button type="button" class="btn secondary" data-mtn="import">导入原版数据</button>
               <button type="button" class="btn secondary" data-mtn="retag">重新统计标签</button>
               <button type="button" class="btn secondary" data-mtn="translate">翻译标签</button>
+              <button type="button" class="btn secondary" data-mtn="retry-tagging" id="mtn-retry-tagging" disabled>
+                重试失败标签<span class="mtn-count hidden" id="mtn-retry-count">0</span>
+              </button>
             </div>
+            <p class="p-desc" id="mtn-retry-hint" style="margin-top:8px">打标签失败的书签会重新入队，并用当前保存的模型重跑。</p>
             <h3 style="font-size:13px;margin:20px 0 10px">任务历史</h3>
             <div class="job-list" id="import-jobs"></div>
           </div>
@@ -653,7 +669,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
             </div>
             <div class="panel">
               <h3>模型选择</h3>
-              <p class="p-desc">选择打标签 / 摘要使用的模型</p>
+              <p class="p-desc">打标签 / 摘要使用的模型。改选后立即保存，对之后入队的任务生效。</p>
               <div class="field">
                 <label for="chat-model-select">对话模型（LLM）</label>
                 <select id="chat-model-select"><option value="">先配置并拉取模型</option></select>
@@ -861,7 +877,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     document.getElementById("page-title").textContent = VIEW_TITLES[name] || "书签";
     if (name === "bookmarks") { startAutoRefresh(); }
     else { stopAutoRefresh(); }
-    if (name === "settings") { loadLlmConfig(); loadImportJobs(); startImportPolling(); }
+    if (name === "settings") { loadLlmConfig(); loadImportJobs(); loadFailedTaggingCount(); startImportPolling(); }
     else if (name === "account") { loadAccount(); }
   }
   document.querySelectorAll("[data-nav]").forEach(function (el) {
@@ -958,30 +974,36 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   });
 
   // ---- 书签状态 ----
+  var PAGE_SIZE = 20;
+  var TAG_COLLAPSED = 60;
+
   var state = {
     filter: "all",          // all | fav | archived
     sortOrder: "desc",      // desc 最新 | asc 最旧
     tagId: null,
     search: "",
-    cursor: null,           // 当前页游标（下一页起点）
-    nextCursor: null,       // 服务端返回的下一页游标
-    prevCursors: [],        // 历史游标栈（上一页）
+    offset: 0,              // 当前页起始偏移（offset 分页）
+    total: 0,               // 当前过滤条件下的总条数
     hasMore: false,
     expandedId: null,
     confirmDeleteId: null,
     tagEditId: null,
     bmCache: {},
-    allTags: null,
+    allTags: null,          // 标签编辑弹窗的候选标签（loadTagCandidates）
+    tagFilterTags: null,    // 标签筛选栏的标签
+    tagFilterTotal: 0,      // 标签总数（用于「展开全部」）
+    tagFilterLoadedAll: false, // 是否已把全部分页拉完
+    tagFilterExpanded: false,  // 当前是否处于展开态（与「已加载全部」是两件事）
     refreshTimer: null
   };
 
   // ---- 书签列表 ----
   function buildQuery() {
-    var q = { limit: 20, includeContent: false, sortOrder: state.sortOrder };
+    var q = { limit: PAGE_SIZE, includeContent: false, sortOrder: state.sortOrder, offset: state.offset };
     if (state.filter === "fav") q.favourited = true;
     if (state.filter === "archived") q.archived = true;
     if (state.tagId) q.tagId = state.tagId;
-    if (state.cursor) q.cursor = state.cursor;
+    if (state.search) q.q = state.search;
     return q;
   }
 
@@ -993,7 +1015,11 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 
   function statusBadgeHtml(bm) {
     if (bm.taggingStatus === "pending") return '<span class="status-badge pending"><span class="dot"></span>标签生成中</span>';
-    if (bm.taggingStatus === "failure") return '<span class="status-badge failure"><span class="dot"></span>标签失败</span>';
+    if (bm.taggingStatus === "failure") {
+      return '<span class="status-badge failure"><span class="dot"></span>标签失败</span>' +
+        '<button type="button" class="btn secondary sm" data-act="retry-tagging" data-id="' + bm.id + '" ' +
+        'title="用当前保存的模型重新生成标签" style="height:20px;padding:0 8px;font-size:11px">重试</button>';
+    }
     if (bm.taggingStatus === "success") return '<span class="status-badge success"><span class="dot"></span>已生成</span>';
     return "";
   }
@@ -1152,18 +1178,17 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     } catch (e) { /* 候选加载失败不阻塞 */ }
   }
 
-  async function loadBookmarks(keepCursor) {
-    if (!keepCursor) {
-      state.cursor = null;
-      state.nextCursor = null;
-      state.prevCursors = [];
-    }
+  // keepPage: false = 回到第 1 页；true = 保持当前 offset
+  async function loadBookmarks(keepPage) {
+    if (!keepPage) state.offset = 0;
     renderSkeleton();
     try {
       var data = await trpc("bookmarks.getBookmarks", buildQuery(), "GET");
-      state.hasMore = !!data.nextCursor;
-      state.nextCursor = data.nextCursor || null;
-      renderBookmarks(data.bookmarks || []);
+      var list = data.bookmarks || [];
+      state.total = typeof data.total === "number" ? data.total : list.length;
+      state.hasMore = state.offset + list.length < state.total;
+      renderBookmarks(list);
+      updateCountLabel();
       updatePagination();
     } catch (err) {
       document.getElementById("bookmark-list").innerHTML =
@@ -1171,29 +1196,51 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     }
   }
 
+  function updateCountLabel() {
+    var el = document.getElementById("bm-count-lbl");
+    if (!el) return;
+    el.textContent = state.search
+      ? "搜索“" + state.search + "”：共 " + state.total + " 条"
+      : "共 " + state.total + " 条";
+  }
+
   function updatePagination() {
     var el = document.getElementById("pagination");
-    if (!state.hasMore && !state.prevCursors.length) {
-      el.classList.add("hidden");
-      return;
-    }
+    var totalPages = Math.max(1, Math.ceil(state.total / PAGE_SIZE));
+    var page = Math.floor(state.offset / PAGE_SIZE) + 1;
+    if (state.total <= PAGE_SIZE) { el.classList.add("hidden"); return; }
     el.classList.remove("hidden");
     document.getElementById("page-info").textContent =
-      "第 " + (state.prevCursors.length + 1) + " 页";
-    document.getElementById("prev-page").disabled = state.prevCursors.length === 0;
-    document.getElementById("next-page").disabled = !state.hasMore;
+      "第 " + page + " / " + totalPages + " 页 · 共 " + state.total + " 条";
+    document.getElementById("prev-page").disabled = page <= 1;
+    document.getElementById("next-page").disabled = page >= totalPages;
+    var jump = document.getElementById("page-jump");
+    if (jump) {
+      jump.max = String(totalPages);
+      if (document.activeElement !== jump) jump.value = String(page);
+    }
+  }
+
+  function gotoPage(p) {
+    var totalPages = Math.max(1, Math.ceil(state.total / PAGE_SIZE));
+    p = Math.min(Math.max(1, p), totalPages);
+    state.offset = (p - 1) * PAGE_SIZE;
+    loadBookmarks(true);
   }
 
   document.getElementById("prev-page").addEventListener("click", function () {
-    if (!state.prevCursors.length) return;
-    state.cursor = state.prevCursors.pop();
-    loadBookmarks(true);
+    gotoPage(Math.floor(state.offset / PAGE_SIZE));
   });
   document.getElementById("next-page").addEventListener("click", function () {
-    if (!state.hasMore) return;
-    state.prevCursors.push(state.cursor);
-    state.cursor = state.nextCursor;
-    loadBookmarks(true);
+    gotoPage(Math.floor(state.offset / PAGE_SIZE) + 2);
+  });
+  document.getElementById("page-jump-go").addEventListener("click", function () {
+    var v = parseInt(document.getElementById("page-jump").value, 10);
+    if (isNaN(v)) return;
+    gotoPage(v);
+  });
+  document.getElementById("page-jump").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); document.getElementById("page-jump-go").click(); }
   });
 
   // ---- 筛选 ----
@@ -1230,26 +1277,92 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   // ---- 标签筛选 ----
   async function loadTagFilter() {
     try {
-      var data = await trpc("tags.list", { limit: 30, sortBy: "usage" }, "GET");
-      var el = document.getElementById("tag-filter");
-      if (!data.tags.length) { el.innerHTML = ""; return; }
-      el.innerHTML = data.tags.map(function (t) {
-        return '<button class="tag-chip" data-tag="' + t.id + '">' + esc(t.name) + ' <span class="cnt">' + t.numBookmarks + "</span></button>";
-      }).join("");
-      el.querySelectorAll(".tag-chip").forEach(function (chip) {
-        chip.addEventListener("click", function () {
-          var active = chip.classList.contains("active");
-          document.querySelectorAll(".tag-chip").forEach(function (c) { c.classList.remove("active"); });
-          if (active) {
-            state.tagId = null;
-          } else {
-            chip.classList.add("active");
-            state.tagId = chip.dataset.tag;
-          }
-          loadBookmarks(false);
-        });
-      });
+      var wasExpanded = state.tagFilterExpanded;
+      var data = await trpc("tags.list", { limit: 100, sortBy: "usage" }, "GET");
+      state.tagFilterTags = data.tags || [];
+      state.tagFilterTotal = typeof data.total === "number" ? data.total : state.tagFilterTags.length;
+      state.tagFilterLoadedAll = false;
+      if (wasExpanded) {
+        await loadAllTagFilterPages();
+        return;
+      }
+      renderTagFilter();
     } catch (e) { /* 标签加载失败不阻塞 */ }
+  }
+
+  // 幂等重建：每次都从 page 0 重新翻完所有分页，累积到局部数组后整体替换。
+  // 反复调用不会重复追加（早期版本往 state.tagFilterTags 上 concat，展开→收起→再展开会翻倍）。
+  async function loadAllTagFilterPages() {
+    var acc = [];
+    var page = 0;
+    var guard = 0;
+    try {
+      while (guard++ < 100) {
+        var d = await trpc("tags.list", { limit: 100, sortBy: "usage", cursor: { page: page } }, "GET");
+        var batch = d.tags || [];
+        if (batch.length) acc = acc.concat(batch);
+        if (!d.nextCursor) break;
+        page = d.nextCursor.page;
+      }
+    } catch (e) { /* 加载失败不阻塞 */ }
+    state.tagFilterTags = acc;
+    state.tagFilterLoadedAll = true;
+    renderTagFilter();
+  }
+
+  function renderTagFilter() {
+    var el = document.getElementById("tag-filter");
+    var tags = state.tagFilterTags || [];
+    if (!tags.length) {
+      el.innerHTML = "";
+      el.classList.remove("expanded");
+      return;
+    }
+    var expanded = !!state.tagFilterExpanded;
+    var shown = expanded ? tags : tags.slice(0, TAG_COLLAPSED);
+    el.innerHTML = shown.map(function (t) {
+      return '<button class="tag-chip' + (state.tagId === t.id ? " active" : "") + '" data-tag="' + t.id + '">' +
+        esc(t.name) + ' <span class="cnt">' + t.numBookmarks + "</span></button>";
+    }).join("");
+    if (state.tagFilterTotal > TAG_COLLAPSED) {
+      var more = document.createElement("button");
+      more.className = "tag-chip tag-more";
+      more.id = "tag-filter-more";
+      more.textContent = expanded ? "收起" : "展开全部（共 " + state.tagFilterTotal + " 个标签）";
+      more.addEventListener("click", async function () {
+        if (state.tagFilterExpanded) {
+          // 只收起，已加载的全量数据保留在 state.tagFilterTags 里
+          state.tagFilterExpanded = false;
+          renderTagFilter();
+          return;
+        }
+        if (!state.tagFilterLoadedAll) {
+          more.disabled = true;
+          more.textContent = "加载中…";
+          await loadAllTagFilterPages(); // 内部会 render 一次
+        }
+        // 必须放在 loadAllTagFilterPages 之后，否则中间态会先闪成收起
+        state.tagFilterExpanded = true;
+        renderTagFilter();
+      });
+      el.appendChild(more);
+    }
+    el.classList.toggle("expanded", expanded);
+    el.querySelectorAll(".tag-chip").forEach(function (chip) {
+      if (!chip.dataset.tag) return;
+      chip.addEventListener("click", function () {
+        var active = chip.classList.contains("active");
+        document.querySelectorAll(".tag-chip").forEach(function (c) { c.classList.remove("active"); });
+        if (active) {
+          state.tagId = null;
+        } else {
+          chip.classList.add("active");
+          state.tagId = chip.dataset.tag;
+        }
+        state.offset = 0;
+        loadBookmarks(false);
+      });
+    });
   }
 
   // ---- 书签操作 ----
@@ -1286,6 +1399,35 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         loadTagFilter();
       } catch (err) {
         toast(err.message || "删除失败", true);
+      }
+      return;
+    }
+    if (act === "retry-tagging") {
+      var rbtn = btn;
+      if (rbtn.disabled) return;
+      rbtn.disabled = true;
+      rbtn.textContent = "重试中…";
+      try {
+        await trpc("bookmarks.retryTagging", { bookmarkId: id });
+        toast("已重新入队，正在用当前模型生成标签");
+        patchBookmarkCard(id, { taggingStatus: "pending" });
+        // 轮询等待打标签完成（最多 60s，每 3s 一次）
+        var tries = 0;
+        var tick = setInterval(async function () {
+          tries++;
+          try {
+            var bm = await trpc("bookmarks.getBookmark", { bookmarkId: id }, "GET");
+            if (bm.taggingStatus !== "pending" || tries >= 20) {
+              clearInterval(tick);
+              await loadBookmarks(true);
+              await loadTagFilter();
+            }
+          } catch (err) { clearInterval(tick); }
+        }, 3000);
+      } catch (err) {
+        rbtn.disabled = false;
+        rbtn.textContent = "重试";
+        toast(err.message || "重试失败", true);
       }
       return;
     }
@@ -1440,8 +1582,11 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       if (document.getElementById("bookmarks-view").classList.contains("hidden")) return;
       try {
         var data = await trpc("bookmarks.getBookmarks", buildQuery(), "GET");
-        state.hasMore = !!data.nextCursor;
-        renderBookmarks(data.bookmarks || []);
+        var list = data.bookmarks || [];
+        state.total = typeof data.total === "number" ? data.total : list.length;
+        state.hasMore = state.offset + list.length < state.total;
+        renderBookmarks(list);
+        updateCountLabel();
         updatePagination();
       } catch (e) { /* 静默失败，下次重试 */ }
     }, 15000);
@@ -1454,7 +1599,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   var importJobs = [];
   var importPollTimer = null;
 
-  var KIND_NAMES = { import: "导入", fix: "修复", retag: "重新统计标签", translate: "翻译标签" };
+  var KIND_NAMES = { import: "导入", fix: "修复", retag: "重新统计标签", translate: "翻译标签", "retry-tagging": "重试失败标签" };
   function kindName(kind) { return KIND_NAMES[kind] || "任务"; }
   function fmtJobStatus(job) {
     if (job.status === "pending") return "排队中";
@@ -1470,7 +1615,9 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         ? '<path d="M4 7h16M4 12h16M4 17h16"/><circle cx="9" cy="7" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="9" cy="17" r="2"/>'
         : kind === "translate"
           ? '<path d="M4 5h10M9 3v2M6.5 5c0 4 3 7 7 8M13 13l-2 2M11 15l-3 3M8 12c-1.5-1-3-3-3.5-5"/>'
-          : '<path d="M12 5v14m0 0 5-5m-5 5-5-5"/><line x1="4" y1="4" x2="4" y2="8"/><line x1="4" y1="4" x2="8" y2="4"/>';
+          : kind === "retry-tagging"
+            ? '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/>'
+            : '<path d="M12 5v14m0 0 5-5m-5 5-5-5"/><line x1="4" y1="4" x2="4" y2="8"/><line x1="4" y1="4" x2="8" y2="4"/>';
     if (status === "success") icon = '<path d="M5 12.5 10 17.5 19.5 7"/>';
     if (status === "failed") icon = '<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>';
     return '<svg class="ic" viewBox="0 0 24 24">' + icon + "</svg>";
@@ -1487,7 +1634,13 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       var j = importJobs[i];
       var stateCls = j.status === "success" ? "ok" : j.status === "failed" ? "fail" : "run";
       var detail = j.status === "success"
-        ? (j.kind === "retag" ? "已统计 " + j.imported + " 个标签" : j.kind === "translate" ? "翻译 " + j.skipped + " 个标签" + (j.failed > 0 ? " · 失败 " + j.failed : "") : "新增 " + j.imported + " · 跳过 " + j.skipped + (j.failed > 0 ? " · 失败 " + j.failed : ""))
+        ? (j.kind === "retag"
+            ? "已统计 " + j.imported + " 个标签"
+            : j.kind === "translate"
+              ? "翻译 " + j.skipped + " 个标签" + (j.failed > 0 ? " · 失败 " + j.failed : "")
+              : j.kind === "retry-tagging"
+                ? "重新入队 " + j.imported + " 条" + (j.skipped > 0 ? " · 跳过 " + j.skipped : "") + (j.failed > 0 ? " · 失败 " + j.failed : "")
+                : "新增 " + j.imported + " · 跳过 " + j.skipped + (j.failed > 0 ? " · 失败 " + j.failed : ""))
         : j.status === "failed"
           ? (j.error || "任务失败")
           : "已处理 " + (j.imported + j.skipped + j.failed) + "/" + j.total;
@@ -1525,6 +1678,55 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   }
   document.addEventListener("beforeunload", function () { stopImportPolling(); stopAutoRefresh(); });
 
+  // ---- 重试失败标签：失败计数驱动按钮徽标与可用态 ----
+  var failedTaggingCount = 0;
+  var failedTaggingFailed = 0;
+  var failedTaggingNever = 0;
+  var failedTaggingStuck = 0;
+  function renderFailedTaggingCount() {
+    var btn = document.getElementById("mtn-retry-tagging");
+    var badge = document.getElementById("mtn-retry-count");
+    if (!btn || !badge) return;
+    badge.textContent = String(failedTaggingCount);
+    badge.classList.toggle("hidden", failedTaggingCount === 0);
+    btn.disabled = failedTaggingCount === 0;
+    btn.title = failedTaggingCount === 0 ? "当前没有打标签失败的书签" : "把 " + failedTaggingCount + " 条失败书签重新入队";
+  }
+  function renderTaggingFailure(reason) {
+    var el = document.getElementById("mtn-retry-hint");
+    if (!el) return;
+    if (!reason && failedTaggingCount === 0) {
+      el.textContent = "打标签失败、以及从未打过标签的书签会重新入队，并用当前保存的模型重跑。";
+      el.style.color = "";
+      return;
+    }
+    // 三类分开说清：失败 / 从未打过标签（原本连徽标都没有）/ 卡在生成中（job 已终态）
+    var parts = [];
+    if (failedTaggingFailed > 0) parts.push(failedTaggingFailed + " 条标签失败");
+    if (failedTaggingNever > 0) parts.push(failedTaggingNever + " 条从未打过标签");
+    if (failedTaggingStuck > 0) parts.push(failedTaggingStuck + " 条卡在生成中");
+    var head = parts.length ? parts.join(" · ") : "";
+    el.textContent = head + (reason ? (head ? " · " : "") + "最近失败原因：" + reason.message : "");
+    el.style.color = reason ? "var(--danger)" : "";
+  }
+  async function loadFailedTaggingCount() {
+    try {
+      var data = await trpc("imports.failedTaggingCount", {}, "GET");
+      failedTaggingCount = data.count || 0;
+      failedTaggingFailed = data.failed || 0;
+      failedTaggingNever = data.neverTagged || 0;
+      failedTaggingStuck = data.stuck || 0;
+      renderTaggingFailure(data.recentFailure);
+    } catch (e) {
+      failedTaggingCount = 0;
+      failedTaggingFailed = 0;
+      failedTaggingNever = 0;
+      failedTaggingStuck = 0;
+      renderTaggingFailure(null);
+    }
+    renderFailedTaggingCount();
+  }
+
   document.getElementById("import-form").addEventListener("submit", async function (e) {
     e.preventDefault();
     var errEl = document.getElementById("import-error");
@@ -1554,14 +1756,22 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   document.querySelectorAll("[data-mtn]").forEach(function (btn) {
     btn.addEventListener("click", async function () {
       var kind = btn.getAttribute("data-mtn");
-      var label = kind === "import" ? "导入" : kind === "retag" ? "重新统计标签" : "翻译标签";
+      var label = kind === "import" ? "导入" : kind === "retag" ? "重新统计标签" : kind === "retry-tagging" ? "重试失败标签" : "翻译标签";
+      // 保留 innerHTML（按钮内含失败计数徽标），文本替换后需可还原
+      var oldHtml = btn.innerHTML;
       btn.disabled = true;
-      var oldText = btn.textContent;
       btn.textContent = "创建中…";
       try {
         if (kind === "import") {
           document.getElementById("import-url").focus();
           toast("请填写源服务器信息后点击「开始导入」");
+        } else if (kind === "retry-tagging") {
+          var job = await trpc("imports.retryFailedTagging", {});
+          toast("已重新入队 " + (job.total || 0) + " 条失败书签，后台处理中");
+          await loadImportJobs();
+          await loadFailedTaggingCount();
+          startImportPolling();
+          loadBookmarks(true);
         } else {
           await trpc("imports.startMaintenanceJob", { kind: kind });
           toast(label + "任务已创建，后台执行中");
@@ -1571,8 +1781,9 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       } catch (err) {
         toast(err.message || "创建" + label + "任务失败");
       } finally {
-        btn.disabled = false;
-        btn.textContent = oldText;
+        btn.innerHTML = oldHtml;
+        // 还原后按最新计数重算可用态（失败数可能已变化）
+        renderFailedTaggingCount();
       }
     });
   });
@@ -1607,9 +1818,10 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 
   // ---- AI 提供商 ----
   var PROVIDER_META = {
-    "workers-ai": { name: "Workers AI", desc: "Cloudflare 内置，免费额度", defaultUrl: "" },
-    "openrouter": { name: "OpenRouter", desc: "聚合多家模型，按量付费", defaultUrl: "https://openrouter.ai/api/v1" },
-    "ollama-cloud": { name: "Ollama Cloud", desc: "Ollama 官方云服务", defaultUrl: "https://ollama.com" }
+    "workers-ai": { name: "Workers AI", desc: "使用部署账户的 AI 绑定，无需 API Key；每日 10,000 Neurons 免费额度（UTC 0 点重置），免费计划用尽后报错，付费计划按量计费", defaultUrl: "" },
+    "openrouter": { name: "OpenRouter", desc: "聚合多家模型，按量付费（零价模型标「免费」）", defaultUrl: "https://openrouter.ai/api/v1" },
+    "ollama-cloud": { name: "Ollama Cloud", desc: "Ollama 官方云服务", defaultUrl: "https://ollama.com" },
+    "opencode-go": { name: "OpenCode Go", desc: "OpenCode 订阅制模型服务；只列出可走 chat completions 的模型，官方零价模型标「免费」", defaultUrl: "https://opencode.ai/inference/go/openai/v1" }
   };
   var providerModels = {};
   var selection = null;
@@ -1617,7 +1829,13 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   function providerIcon(p) {
     if (p === "workers-ai") return '<path d="M12 2 4 7v10l8 5 8-5V7l-8-5Z"/><path d="M12 22V12"/><path d="m4 7 8 5 8-5"/>';
     if (p === "openrouter") return '<circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M19.1 4.9l-2.8 2.8M7.7 16.3l-2.8 2.8"/>';
+    if (p === "opencode-go") return '<path d="M4 7h16v10H4z"/><path d="m8 11 2 2-2 2M13 15h3"/>';
     return '<path d="M4 17V7a1 1 0 0 1 1.5-.9l12 6a1 1 0 0 1 0 1.8l-12 6A1 1 0 0 1 4 17Z"/>';
+  }
+
+  // 模型展示文案：免费/推荐标签统一走这里，卡片下拉与「模型选择」保持一致
+  function modelLabel(x) {
+    return x.name + (x.recommended ? " · 推荐" : "") + (x.free ? " · 免费" : "");
   }
 
   function renderProviderList(providers) {
@@ -1629,6 +1847,14 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       var badge = cfg
         ? '<span class="p-badge ok">已配置' + (cfg.apiKeyConfigured ? " · Key 已存" : "") + "</span>"
         : '<span class="p-badge no">未配置</span>';
+      // Workers AI 走部署账户的 AI 绑定，没有 Base URL / API Key 可填
+      var credRow = p === "workers-ai"
+        ? '<div class="e-row"><div class="field"><label>凭据</label>' +
+          '<div class="p-desc" style="margin:0">使用部署账户的 Workers AI 绑定，无需 API Key</div></div></div>'
+        : '<div class="e-row">' +
+            '<div class="field"><label>Base URL</label><input type="url" data-f="url" placeholder="' + meta.defaultUrl + '"></div>' +
+            '<div class="field"><label>API Key（留空保持不变）</label><input type="password" data-f="key" autocomplete="off" placeholder="sk-..."></div>' +
+          "</div>";
       html +=
         '<div class="provider-item" data-provider="' + p + '">' +
           '<div class="p-head">' +
@@ -1638,10 +1864,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
             '<button type="button" class="btn secondary sm" data-act="edit">' + (cfg ? "编辑" : "配置") + "</button>" +
           "</div>" +
           '<div class="edit-form">' +
-            '<div class="e-row">' +
-              '<div class="field"><label>Base URL</label><input type="url" data-f="url" placeholder="' + meta.defaultUrl + '"></div>' +
-              '<div class="field"><label>API Key（留空保持不变）</label><input type="password" data-f="key" autocomplete="off" placeholder="sk-..."></div>' +
-            "</div>" +
+            credRow +
             '<div class="e-line">' +
               '<button type="button" class="btn secondary sm" data-act="fetch">拉取模型列表</button>' +
               '<span class="e-status fetch-status"></span>' +
@@ -1696,13 +1919,15 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     errEl.textContent = "";
     statusEl.textContent = "拉取中…";
     try {
-      var url = card.querySelector('[data-f="url"]').value.trim() || undefined;
-      var key = card.querySelector('[data-f="key"]').value;
+      var urlEl = card.querySelector('[data-f="url"]');
+      var keyEl = card.querySelector('[data-f="key"]');
+      var url = urlEl ? urlEl.value.trim() || undefined : undefined;
+      var key = keyEl ? keyEl.value : "";
       var payload = { provider: provider };
       if (url) payload.baseUrl = url;
       if (key) payload.apiKey = key;
       await trpc("llm.setProviderConfig", payload);
-      card.querySelector('[data-f="key"]').value = "";
+      if (keyEl) keyEl.value = "";
       var data = await trpc("llm.listModels", { provider: provider }, "GET");
       providerModels[provider] = {
         chat: data.models.filter(function (m) { return m.kind === "chat"; }),
@@ -1727,7 +1952,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       m.chat.forEach(function (x) {
         var o = document.createElement("option");
         o.value = x.id;
-        o.textContent = x.name;
+        o.textContent = modelLabel(x);
         chatSel.appendChild(o);
       });
     } else {
@@ -1740,7 +1965,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       m.embedding.forEach(function (x) {
         var o = document.createElement("option");
         o.value = x.id;
-        o.textContent = x.name;
+        o.textContent = modelLabel(x);
         embedSel.appendChild(o);
       });
     } else {
@@ -1756,13 +1981,15 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     var statusEl = card.querySelector(".save-status");
     errEl.textContent = "";
     try {
-      var url = card.querySelector('[data-f="url"]').value.trim() || undefined;
-      var key = card.querySelector('[data-f="key"]').value;
+      var urlEl = card.querySelector('[data-f="url"]');
+      var keyEl = card.querySelector('[data-f="key"]');
+      var url = urlEl ? urlEl.value.trim() || undefined : undefined;
+      var key = keyEl ? keyEl.value : "";
       var payload = { provider: provider };
       if (url) payload.baseUrl = url;
       if (key) payload.apiKey = key;
       await trpc("llm.setProviderConfig", payload);
-      card.querySelector('[data-f="key"]').value = "";
+      if (keyEl) keyEl.value = "";
       statusEl.textContent = "已保存";
       statusEl.className = "e-status save-status ok";
       loadLlmConfig();
@@ -1779,18 +2006,26 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     var chatOpts = [];
     Object.keys(providerModels).forEach(function (p) {
       providerModels[p].chat.forEach(function (x) {
-        chatOpts.push({ provider: p, id: x.id, name: x.name });
+        chatOpts.push({ provider: p, id: x.id, label: modelLabel(x) });
       });
     });
     if (chatOpts.length) {
       chatOpts.forEach(function (x) {
         var o = document.createElement("option");
         o.value = x.provider + "::" + x.id;
-        o.textContent = "[" + (PROVIDER_META[x.provider] || {}).name + "] " + x.name;
+        o.textContent = "[" + (PROVIDER_META[x.provider] || {}).name + "] " + x.label;
         chatSel.appendChild(o);
       });
       var cur = sel.chatProvider + "::" + sel.chatModel;
       if (chatOpts.some(function (x) { return x.provider + "::" + x.id === cur; })) {
+        chatSel.value = cur;
+      } else {
+        // 已保存的模型不在列表里（下线/改名）→ 不能悄悄选中别的模型，
+        // 否则用户以为「我保存的就是这个」，实际库里还是旧值。
+        var saved = document.createElement("option");
+        saved.value = cur;
+        saved.textContent = "[" + (PROVIDER_META[sel.chatProvider] || {}).name + "] " + sel.chatModel + "（当前已保存 · 不在可用列表中）";
+        chatSel.insertBefore(saved, chatSel.firstChild);
         chatSel.value = cur;
       }
     } else {
@@ -1802,7 +2037,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     var embOpts = [];
     Object.keys(providerModels).forEach(function (p) {
       providerModels[p].embedding.forEach(function (x) {
-        embOpts.push({ provider: p, id: x.id, name: x.name });
+        embOpts.push({ provider: p, id: x.id, label: modelLabel(x) });
       });
     });
     var noneOpt = document.createElement("option");
@@ -1812,7 +2047,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     embOpts.forEach(function (x) {
       var o = document.createElement("option");
       o.value = x.provider + "::" + x.id;
-      o.textContent = "[" + (PROVIDER_META[x.provider] || {}).name + "] " + x.name;
+      o.textContent = "[" + (PROVIDER_META[x.provider] || {}).name + "] " + x.label;
       embedSel.appendChild(o);
     });
     if (sel.embeddingProvider && sel.embeddingModel) {
@@ -1823,9 +2058,15 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     }
   }
 
-  document.getElementById("save-selection").addEventListener("click", async function () {
+  // 保存模型选择：读回服务端真实值再显示。
+  // 教训：旧模型被下线后，下拉框曾经静默显示别的模型，用户以为已保存，
+  // 实际库里还是旧值，打标签失败一个月都查不出来。
+  var savingSelection = false;
+  async function saveSelection(quiet) {
     var errEl = document.getElementById("llm-error");
     var statusEl = document.getElementById("llm-status");
+    if (savingSelection) return;
+    savingSelection = true;
     errEl.textContent = "";
     try {
       var chatSel = document.getElementById("chat-model-select");
@@ -1842,11 +2083,30 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         payload.embeddingModel = parts[1];
       }
       await trpc("llm.setSelection", payload);
-      statusEl.textContent = "模型选择已保存";
-      toast("模型选择已保存");
+      var saved = await trpc("llm.getConfigs", {}, "GET");
+      selection = saved.selection;
+      statusEl.textContent = "已保存：" + saved.selection.chatProvider + " / " + saved.selection.chatModel;
+      if (failedTaggingCount > 0) {
+        statusEl.textContent += " · 可点「重试失败标签」用新模型重跑";
+      }
+      toast(quiet ? "已保存：" + saved.selection.chatModel : "模型选择已保存");
     } catch (err) {
       errEl.textContent = err.message || "保存失败";
+      if (quiet) toast(err.message || "保存失败", true);
+    } finally {
+      savingSelection = false;
     }
+  }
+
+  document.getElementById("save-selection").addEventListener("click", function () {
+    saveSelection(false);
+  });
+
+  // 改下拉框即保存：避免「选好了但没点保存」——这是模型被下线后一直没换过来的直接原因
+  ["chat-model-select", "embed-model-select"].forEach(function (id) {
+    document.getElementById(id).addEventListener("change", function () {
+      saveSelection(true);
+    });
   });
 
   async function loadLlmConfig() {
@@ -1855,7 +2115,11 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       var cfg = await trpc("llm.getConfigs", {}, "GET");
       selection = cfg.selection;
       renderProviderList(cfg.providers);
-      var configured = cfg.providers.filter(function (p) { return p.apiKeyConfigured; });
+      // workers-ai 不需要 Key（走部署账户的 AI 绑定），必须一并拉取，
+      // 否则模型选择下拉框里看不到 Workers AI 的模型（含默认模型）。
+      var configured = [{ provider: "workers-ai" }].concat(
+        cfg.providers.filter(function (p) { return p.apiKeyConfigured; })
+      );
       for (var i = 0; i < configured.length; i++) {
         var p = configured[i].provider;
         try {
@@ -1949,8 +2213,11 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 </html>
 `;
 
-export async function handleDashboard(_env: Env): Promise<Response> {
-  return new Response(DASHBOARD_HTML, {
+export async function handleDashboard(env: Env): Promise<Response> {
+  // 页脚版本号必须来自 SERVER_VERSION：写死的 v0.2.0 曾让人以为线上跑的是另一个版本，
+  // 白白浪费一轮排查（真实 /api/version 一直是 0.1.0）。
+  const version = /^[0-9A-Za-z._-]{1,20}$/.test(env.SERVER_VERSION ?? "") ? env.SERVER_VERSION : "dev";
+  return new Response(DASHBOARD_HTML.replace("__SERVER_VERSION__", version), {
     status: 200,
     headers: { "content-type": "text/html; charset=utf-8" },
   });

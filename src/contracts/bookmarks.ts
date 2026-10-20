@@ -191,11 +191,34 @@ export const zGetBookmarksRequestSchema = z.object({
   sortOrder: z.enum(["asc", "desc"]).optional().default("desc"),
   includeContent: z.boolean().optional().default(false),
   useCursorV2: z.boolean().optional(),
+  // karaclone 扩展：仪表盘搜索框直传的查询串（支持 is:/tag:/url:/title: 等 qualifier）
+  q: z.string().optional(),
+  // karaclone 扩展：仪表盘分页器按 offset 翻页（与 cursor 互斥，传了 offset 就走 offset 分支）
+  offset: z.number().int().min(0).optional(),
+});
+
+// 上游：packages/shared/types/bookmarks.ts:353-368
+export const zSearchBookmarksCursor = z.discriminatedUnion("ver", [
+  z.object({ ver: z.literal(1), offset: z.number() }),
+]);
+
+export const zBookmarkSearchMode = z.enum(["fts", "semantic", "hybrid"]);
+
+export const zSearchBookmarksRequestSchema = z.object({
+  text: z.string(),
+  limit: z.number().int().min(1).max(MAX_NUM_BOOKMARKS_PER_PAGE).optional(),
+  cursor: zSearchBookmarksCursor.nullish(),
+  sortOrder: z.enum(["asc", "desc", "relevance"]).optional().default("relevance"),
+  searchMode: zBookmarkSearchMode.optional().default("fts"),
+  includeContent: z.boolean().optional().default(false),
 });
 
 export const zGetBookmarksResponseSchema = z.object({
   bookmarks: z.array(zBookmarkSchema),
   nextCursor: zCursorV2.nullable(),
+  // karaclone 给仪表盘分页器加的扩展字段（匹配当前过滤条件的总条数）。
+  // 上游契约没有它，故为 optional：test/contracts.test.ts 会按上游形态 parse 本 schema。
+  total: z.number().int().min(0).optional(),
 });
 export type GetBookmarksResponse = z.infer<typeof zGetBookmarksResponseSchema>;
 export const getBookmarksResponseSchema = zGetBookmarksResponseSchema;

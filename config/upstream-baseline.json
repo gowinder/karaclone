@@ -1,0 +1,18 @@
+{
+  "$comment": "上游 Karakeep 协议基线。改这个文件只应在确认兼容性后由协议同步流程完成。",
+  "upstream": {
+    "repo": "https://github.com/karakeep-app/karakeep",
+    "commit": "5a2f009e2f6d266087f2f3f527e6e384cefd6de4",
+    "commitDate": "2026-08-31",
+    "localClone": ".phase0/upstream/karakeep"
+  },
+  "clients": {
+    "mobile": { "version": "1.11.0", "build": "45", "packageId": "app.hoarder.hoardermobile" },
+    "browserExtension": { "version": "1.2.11", "extensionId": "kgcjekpmcjjogibpjebkhaanilehneje" }
+  },
+  "notes": [
+    "锁定的客户端版本是兼容性判断的基准：客户端调用面（api.<router>.<procedure>）只要被完整实现，即视为兼容。",
+    "上游内部 tRPC API 无兼容性保证（维护者声明，见 discussion #3122）。上游只保证新客户端能连老服务端，不保证老服务端能配新客户端。",
+    "本地 clone 位于 .phase0/upstream/karakeep（未纳入版本控制），保持 HEAD 在 commit 字段指向的基线。"
+  ]
+}

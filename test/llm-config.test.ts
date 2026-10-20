@@ -117,12 +117,18 @@ describe("llm.getConfigs / setProviderConfig / setSelection", () => {
     expect(row?.api_key_enc).not.toContain("plain-secret-xyz");
   });
 
-  it("listModels workers-ai 硬编码单模型", async () => {
+  it("listModels workers-ai 返回硬编码模型列表（默认 8B fast + 推荐的 70B fast）", async () => {
     const key = await signupAndKey("llm-list@test.com");
     const c = await caller(key);
     const { models } = await c.llm.listModels({ provider: "workers-ai" });
-    expect(models).toHaveLength(1);
-    expect(models[0]).toMatchObject({ id: "@cf/meta/llama-3.1-8b-instruct-fast", kind: "chat" });
+    expect(models.map((m) => m.id)).toEqual([
+      "@cf/meta/llama-3.1-8b-instruct-fast",
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+    ]);
+    expect(models[0]).toMatchObject({ kind: "chat", recommended: false });
+    expect(models[1]).toMatchObject({ kind: "chat", recommended: true });
+    // Workers AI 是「每日免费额度」，不能标成「免费」
+    expect(models.every((m) => m.free === false)).toBe(true);
   });
 
   it("listModels 未配置 key → 抛错", async () => {
@@ -145,6 +151,13 @@ describe("llm.getConfigs / setProviderConfig / setSelection", () => {
     await c.llm.setProviderConfig({ provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1", apiKey: "sk-or-v1-real" });
     const originalFetch = globalThis.fetch;
     vi.stubGlobal("fetch", async (url: string | URL | Request, init?: RequestInit) => {
+      // 未选过模型时先拉模型列表挑探针模型，再打 chat completions
+      if (String(url) === "https://openrouter.ai/api/v1/models") {
+        return new Response(JSON.stringify({ data: [{ id: "openai/gpt-4o-mini", name: "GPT-4o Mini" }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
       expect(String(url)).toBe("https://openrouter.ai/api/v1/chat/completions");
       expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer sk-or-v1-real");
       return new Response(JSON.stringify({ choices: [{ message: { content: "pong" } }] }), {
@@ -176,6 +189,55 @@ describe("llm.getConfigs / setProviderConfig / setSelection", () => {
     try {
       const r = await c.llm.testProvider({ provider: "ollama-cloud" });
       expect(r.ok).toBe(true);
+    } finally {
+      vi.stubGlobal("fetch", originalFetch);
+    }
+  });
+
+  // 真实事故回归：模型被下线（ollama-cloud 410 retired）时，写死 gpt-oss:120b 的
+  // 连接测试照样「成功」，用户以为配置没问题，实际每条打标签都在失败。
+  it("testProvider 使用「模型选择」里保存的模型，而不是写死的探针模型", async () => {
+    const key = await signupAndKey("llm-test-selected@test.com");
+    const c = await caller(key);
+    await c.llm.setProviderConfig({ provider: "ollama-cloud", baseUrl: "https://ollama.com", apiKey: "ollama-key" });
+    await c.llm.setSelection({ chatProvider: "ollama-cloud", chatModel: "deepseek-v4.1-flash" });
+    const originalFetch = globalThis.fetch;
+    let seenModel: string | null = null;
+    vi.stubGlobal("fetch", async (_url: string | URL | Request, init?: RequestInit) => {
+      seenModel = (JSON.parse(String(init?.body)) as { model: string }).model;
+      return new Response(JSON.stringify({ choices: [{ message: { content: "pong" } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    try {
+      const r = await c.llm.testProvider({ provider: "ollama-cloud" });
+      expect(r.ok).toBe(true);
+      expect(seenModel).toBe("deepseek-v4.1-flash");
+      expect(r.message).toContain("deepseek-v4.1-flash");
+    } finally {
+      vi.stubGlobal("fetch", originalFetch);
+    }
+  });
+
+  it("testProvider 模型已下线（410）→ ok:false 并回显模型名", async () => {
+    const key = await signupAndKey("llm-test-retired@test.com");
+    const c = await caller(key);
+    await c.llm.setProviderConfig({ provider: "ollama-cloud", baseUrl: "https://ollama.com", apiKey: "ollama-key" });
+    await c.llm.setSelection({ chatProvider: "ollama-cloud", chatModel: "deepseek-v4-flash:0731" });
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        new Response(JSON.stringify({ error: { message: "deepseek-v4-flash:0731 was retired at 2026-09-25" } }), {
+          status: 410,
+        }),
+    );
+    try {
+      const r = await c.llm.testProvider({ provider: "ollama-cloud" });
+      expect(r.ok).toBe(false);
+      expect(r.message).toContain("410");
+      expect(r.message).toContain("deepseek-v4-flash:0731");
     } finally {
       vi.stubGlobal("fetch", originalFetch);
     }

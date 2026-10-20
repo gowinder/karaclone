@@ -1,6 +1,7 @@
 import { canonicalizeUrl } from "../url/canonicalize.js";
 import { parseQueueMessage } from "../queue/contracts.js";
 import { fetchPageMeta } from "./page-meta.js";
+import { buildSearchConditions, parseSearchQuery } from "./search-query.js";
 
 export interface CreateBookmarkInput {
   userId: string;
@@ -44,11 +45,19 @@ export interface ListOptions {
   cursor: Cursor | null;
   archived: boolean;
   sortOrder: "asc" | "desc";
+  favourited?: boolean | null;
+  tagId?: string | null;
+  /** 搜索串（支持 is:/tag:/url:/title:/source:/after:/before: 与裸词）。 */
+  q?: string | null;
+  /** 传了就按 offset 分页（仪表盘分页器）；否则走 keyset cursor。 */
+  offset?: number | null;
 }
 
 export interface ListResult {
   bookmarks: ServiceBookmark[];
   nextCursor: Cursor | null;
+  /** 与当前过滤条件（不含 cursor/offset）匹配的总条数。 */
+  total: number;
 }
 
 interface BookmarkDbRow {
@@ -148,36 +157,74 @@ export async function createBookmark(
   return { bookmark: mapRow(row), created: true };
 }
 
+/**
+ * 分页查询与 COUNT 共用的 WHERE 构造器。
+ * 返回的 where 不含前导 WHERE，参数顺序与 where 中的 ? 一一对应。
+ */
+function buildListWhere(userId: string, opts: ListOptions): { where: string; params: unknown[] } {
+  const clauses = ["b.user_id = ?", "b.archived = ?"];
+  const params: unknown[] = [userId, opts.archived ? 1 : 0];
+
+  if (opts.favourited != null) {
+    clauses.push("b.favourited = ?");
+    params.push(opts.favourited ? 1 : 0);
+  }
+  if (opts.tagId) {
+    clauses.push("EXISTS (SELECT 1 FROM bookmark_tags bt WHERE bt.bookmark_id = b.id AND bt.tag_id = ?)");
+    params.push(opts.tagId);
+  }
+  const q = opts.q?.trim();
+  if (q) {
+    const { clauses: searchClauses, params: searchParams } = buildSearchConditions(parseSearchQuery(q));
+    clauses.push(...searchClauses);
+    params.push(...searchParams);
+  }
+  return { where: clauses.join(" AND "), params };
+}
+
 export async function getBookmarks(
   db: D1Database,
   userId: string,
   opts: ListOptions,
 ): Promise<ListResult> {
-  const { limit, cursor, archived, sortOrder } = opts;
-  const archivedInt = archived ? 1 : 0;
+  const { limit, cursor, sortOrder } = opts;
   const asc = sortOrder === "asc";
   const cmp = asc ? ">" : "<";
   const order = asc ? "ASC" : "DESC";
 
+  const { where, params } = buildListWhere(userId, opts);
+
   const select = `SELECT b.*, l.description, l.favicon
     FROM bookmarks b LEFT JOIN bookmark_links l ON l.id = b.id`;
   let rows: BookmarkDbRow[];
-  if (cursor) {
+  if (opts.offset != null) {
+    rows = await db
+      .prepare(`${select} WHERE ${where} ORDER BY b.created_at ${order}, b.id ${order} LIMIT ? OFFSET ?`)
+      .bind(...params, limit + 1, opts.offset)
+      .all<BookmarkDbRow>()
+      .then((r) => (r.results ?? []) as BookmarkDbRow[]);
+  } else if (cursor) {
     const cursorMs = cursor.createdAt.getTime();
     rows = await db
       .prepare(
-        `${select} WHERE b.user_id = ? AND b.archived = ? AND ((b.created_at ${cmp} ?) OR (b.created_at = ? AND b.id ${cmp} ?)) ORDER BY b.created_at ${order}, b.id ${order} LIMIT ?`,
+        `${select} WHERE ${where} AND ((b.created_at ${cmp} ?) OR (b.created_at = ? AND b.id ${cmp} ?)) ORDER BY b.created_at ${order}, b.id ${order} LIMIT ?`,
       )
-      .bind(userId, archivedInt, cursorMs, cursorMs, cursor.id, limit + 1)
+      .bind(...params, cursorMs, cursorMs, cursor.id, limit + 1)
       .all<BookmarkDbRow>()
       .then((r) => (r.results ?? []) as BookmarkDbRow[]);
   } else {
     rows = await db
-      .prepare(`${select} WHERE b.user_id = ? AND b.archived = ? ORDER BY b.created_at ${order}, b.id ${order} LIMIT ?`)
-      .bind(userId, archivedInt, limit + 1)
+      .prepare(`${select} WHERE ${where} ORDER BY b.created_at ${order}, b.id ${order} LIMIT ?`)
+      .bind(...params, limit + 1)
       .all<BookmarkDbRow>()
       .then((r) => (r.results ?? []) as BookmarkDbRow[]);
   }
+
+  const countRow = await db
+    .prepare(`SELECT COUNT(*) AS n FROM bookmarks b WHERE ${where}`)
+    .bind(...params)
+    .first<{ n: number }>();
+  const total = countRow?.n ?? 0;
 
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
@@ -210,6 +257,7 @@ export async function getBookmarks(
   return {
     bookmarks,
     nextCursor: hasMore && last ? { createdAt: new Date(last.created_at), id: last.id } : null,
+    total,
   };
 }
 

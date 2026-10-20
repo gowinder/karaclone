@@ -1,12 +1,57 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../base.js";
 import { encryptSecret, decryptSecret } from "../../auth/secret-box.js";
-import { listProviderModels } from "../../ai/model-list.js";
+import { listProviderModels, type ProviderModel } from "../../ai/model-list.js";
 import { runOpenAiCompatible } from "../../ai/openai-compatible.js";
+import { LLM_PROVIDERS, resolveProviderRequest, type LlmProvider } from "../../ai/providers.js";
 
 const DEFAULT_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
+// 未选择对话模型时测试连接用的兜底探针模型（Ollama Cloud 仍在线的通用模型）
+const FALLBACK_TEST_MODEL = "gpt-oss:120b";
 
-const zProviderSchema = z.enum(["workers-ai", "openrouter", "ollama-cloud"]);
+// Workers AI 可选模型（recommended 是「本项目推荐」，非 Cloudflare 官方推荐）。
+// 默认仍是现有 8B fast；新增 70B fast 标为推荐备选，它在官方 JSON Mode 支持列表内
+// https://developers.cloudflare.com/workers-ai/features/json-mode/ ，质量优先但更耗每日额度。
+// 未加入非 fast 的 @cf/meta/llama-3.1-8b-instruct（Cloudflare 2026-05-08 有模型弃用公告）。
+const WORKERS_AI_MODELS: ProviderModel[] = [
+  {
+    id: DEFAULT_MODEL,
+    name: "Llama 3.1 8B Instruct (Fast) · 默认",
+    kind: "chat",
+    contextLength: null,
+    pricing: null,
+    // Workers AI 是「每日免费额度」而不是「免费」，不用免费标记（额度说明在 provider 描述里）
+    free: false,
+    recommended: false,
+  },
+  {
+    id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+    name: "Llama 3.3 70B Instruct FP8 (Fast) · 质量优先，更耗每日额度",
+    kind: "chat",
+    contextLength: null,
+    pricing: null,
+    free: false,
+    recommended: true,
+  },
+];
+
+const zProviderSchema = z.enum(LLM_PROVIDERS);
+
+// 兜底探针模型：用户还没在「模型选择」里选过该 provider 的模型时使用。
+// 不能所有 provider 共用一个写死的模型（gpt-oss:120b 只存在于 Ollama Cloud），
+// 否则别的 provider 的「测试连接」会拿一个不存在的模型去调 → 永远失败。
+// 除 ollama-cloud 外，一律从该 provider 的真实模型列表里取 chat 模型（优先免费，省测试费用）。
+async function fallbackProbeModel(
+  provider: Exclude<LlmProvider, "workers-ai">,
+  baseUrl: string,
+  apiKey: string,
+): Promise<string> {
+  if (provider === "ollama-cloud") return FALLBACK_TEST_MODEL;
+  const models = await listProviderModels(provider, baseUrl, apiKey);
+  const chat = models.filter((m) => m.kind === "chat");
+  if (chat.length === 0) throw new Error("该 provider 未返回可用的对话模型");
+  return (chat.find((m) => m.free) ?? chat[0]!).id;
+}
 
 const zProviderConfigSchema = z.object({
   provider: zProviderSchema,
@@ -27,6 +72,8 @@ const zModelSchema = z.object({
   kind: z.enum(["chat", "embedding"]),
   contextLength: z.number().nullable(),
   pricing: z.object({ prompt: z.string().nullable(), completion: z.string().nullable() }).nullable(),
+  free: z.boolean(),
+  recommended: z.boolean(),
 });
 
 export const llmRouter = router({
@@ -121,11 +168,7 @@ export const llmRouter = router({
     .output(z.object({ models: z.array(zModelSchema) }))
     .query(async ({ input, ctx }) => {
       if (input.provider === "workers-ai") {
-        return {
-          models: [
-            { id: "@cf/meta/llama-3.1-8b-instruct-fast", name: "Llama 3.1 8B Instruct (Fast)", kind: "chat" as const, contextLength: null, pricing: null },
-          ],
-        };
+        return { models: WORKERS_AI_MODELS };
       }
       const row = await ctx.env.DB.prepare("SELECT base_url, api_key_enc FROM user_llm_config WHERE user_id = ? AND provider = ?")
         .bind(ctx.user.id, input.provider)
@@ -136,7 +179,7 @@ export const llmRouter = router({
       const secret = ctx.env.LLM_CONFIG_KEY;
       if (!secret) throw new Error("LLM_CONFIG_KEY not configured");
       const apiKey = await decryptSecret(row.api_key_enc, secret);
-      const baseUrl = row.base_url ?? (input.provider === "openrouter" ? "https://openrouter.ai/api/v1" : "https://ollama.com");
+      const { baseUrl } = resolveProviderRequest(input.provider, row.base_url, ctx.user.id);
       const models = await listProviderModels(input.provider, baseUrl, apiKey);
       return { models };
     }),
@@ -165,21 +208,39 @@ export const llmRouter = router({
         return { ok: false, message: "服务端 LLM_CONFIG_KEY 未配置", latencyMs: null };
       }
       const apiKey = await decryptSecret(row.api_key_enc, secret);
-      const baseUrl = row.base_url ?? (input.provider === "openrouter" ? "https://openrouter.ai/api/v1" : "https://ollama.com");
+      const req = resolveProviderRequest(input.provider, row.base_url, ctx.user.id);
+      // 测试必须打「模型选择」里当前保存的模型，否则会出现「连接成功但打标签全挂」
+      // 的假绿：模型被下线（如 ollama-cloud 返回 410 retired）时，写死的探针模型照样通。
+      const sel = await ctx.env.DB.prepare(
+        "SELECT chat_provider, chat_model FROM user_llm_selection WHERE user_id = ?",
+      )
+        .bind(ctx.user.id)
+        .first<{ chat_provider: string; chat_model: string }>();
       const started = Date.now();
+      let model = sel?.chat_provider === input.provider && sel.chat_model ? sel.chat_model : "";
       try {
-        // 最小调用：发一条 ping 消息，验证 URL 可达 + key 有效
+        if (!model) model = await fallbackProbeModel(input.provider, req.baseUrl, apiKey);
+        // 最小调用：发一条 ping 消息，验证 URL 可达 + key 有效 + 该模型仍在线
         await runOpenAiCompatible({
-          baseUrl,
+          baseUrl: req.baseUrl,
           apiKey,
-          model: "gpt-oss:120b",
+          model,
           messages: [{ role: "user", content: "ping" }],
-          endpoint: input.provider === "ollama-cloud" ? "v1/chat/completions" : "chat/completions",
+          endpoint: req.endpoint,
+          headers: req.headers,
         });
-        return { ok: true, message: "连接成功，API Key 有效", latencyMs: Date.now() - started };
+        return {
+          ok: true,
+          message: `连接成功，API Key 有效（测试模型：${model}）`,
+          latencyMs: Date.now() - started,
+        };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        return { ok: false, message: msg.slice(0, 300), latencyMs: Date.now() - started };
+        return {
+          ok: false,
+          message: `模型 ${model || "（未确定）"} 调用失败：${msg.slice(0, 260)}`,
+          latencyMs: Date.now() - started,
+        };
       }
     }),
 });

@@ -103,7 +103,7 @@ describe("compat mutation 拒绝", () => {
 describe("compat HTTP 路由", () => {
   it("/api/health 与 /api/version", async () => {
     expect(await json("/api/health")).toEqual({ status: "ok", message: "Web app is working" });
-    expect(await json("/api/version")).toEqual({ version: "0.1.0" });
+    expect(await json("/api/version")).toEqual({ version: "0.2.1" });
   });
 
   it("/api/unknown → 404 JSON", async () => {

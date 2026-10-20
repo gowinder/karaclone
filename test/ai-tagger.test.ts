@@ -119,11 +119,13 @@ describe("runLockedTextModel", () => {
   });
 
   it("返回 unknown 双重转换结果", async () => {
-    const out = await runLockedTextModel(env.AI, LOCKED_MODEL, {
+    // 原实现依赖远程 AI binding（remoteBindings）才能跑；这里用 stub 直接
+    // 验证 double-cast 解析路径：binding.run 返回 { response } 时应取出该字段。
+    const stubAi = { run: async () => ({ response: '{"ok":true}' }) };
+    const out = await runLockedTextModel(stubAi, LOCKED_MODEL, {
       messages: [{ role: "user", content: "hi" }],
     });
-    // 本地 mock 环境无真实 AI binding 时可能抛错；此处只验证类型路径可调用。
-    expect(typeof out).not.toBe("undefined");
+    expect(out).toBe('{"ok":true}');
   });
 });
 

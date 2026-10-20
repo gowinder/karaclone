@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, router } from "../base.js";
 import {
@@ -5,6 +6,8 @@ import {
   zGetBookmarksRequestSchema,
   zGetBookmarksResponseSchema,
   zNewBookmarkRequestSchema,
+  zSearchBookmarksCursor,
+  zSearchBookmarksRequestSchema,
 } from "../../contracts/bookmarks.js";
 import {
   createBookmark as serviceCreate,
@@ -14,6 +17,8 @@ import {
   type ServiceBookmark,
 } from "../../bookmarks/service.js";
 import { renderReaderHtml } from "../../bookmarks/reader-html.js";
+import { requeueFailedTagging } from "../../bookmarks/retag.js";
+import { buildSearchConditions, parseSearchQuery } from "../../bookmarks/search-query.js";
 
 function toContractBookmark(bm: ServiceBookmark): z.infer<typeof zBookmarkSchema> {
   return {
@@ -61,6 +66,72 @@ function toContractBookmark(bm: ServiceBookmark): z.infer<typeof zBookmarkSchema
   };
 }
 
+type BookmarkRow = {
+  id: string;
+  user_id: string;
+  canonical_url: string;
+  title: string | null;
+  note: string | null;
+  summary: string | null;
+  archived: number;
+  favourited: number;
+  source: string | null;
+  crawl_status: string | null;
+  tagging_status: string | null;
+  created_at: number;
+  modified_at: number | null;
+};
+
+/** bookmarks 行 → ServiceBookmark（不含 tags）。 */
+function rowToServiceBookmark(row: BookmarkRow): ServiceBookmark {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    canonicalUrl: row.canonical_url,
+    title: row.title,
+    note: row.note,
+    summary: row.summary,
+    archived: row.archived === 1,
+    favourited: row.favourited === 1,
+    source: row.source as ServiceBookmark["source"],
+    crawlStatus: row.crawl_status as ServiceBookmark["crawlStatus"],
+    taggingStatus: row.tagging_status as ServiceBookmark["taggingStatus"],
+    tags: [],
+    createdAt: new Date(row.created_at),
+    modifiedAt: row.modified_at === null ? null : new Date(row.modified_at),
+    description: null,
+    favicon: null,
+  };
+}
+
+/** 批量补全 tags（避免逐行 N+1）。 */
+async function attachTags(
+  db: D1Database,
+  bookmarks: ServiceBookmark[],
+): Promise<ServiceBookmark[]> {
+  if (bookmarks.length === 0) return bookmarks;
+  const placeholders = bookmarks.map(() => "?").join(",");
+  const rows = await db
+    .prepare(
+      `SELECT bt.bookmark_id, t.id, t.name, bt.attached_by
+       FROM bookmark_tags bt JOIN tags t ON t.id = bt.tag_id
+       WHERE bt.bookmark_id IN (${placeholders})
+       ORDER BY bt.attached_at ASC, t.name ASC`,
+    )
+    .bind(...bookmarks.map((b) => b.id))
+    .all<{ bookmark_id: string; id: string; name: string; attached_by: string }>();
+  const byBookmark: Record<string, ServiceBookmark["tags"]> = {};
+  for (const r of rows.results ?? []) {
+    (byBookmark[r.bookmark_id] ??= []).push({
+      id: r.id,
+      name: r.name,
+      attachedBy: r.attached_by as "ai" | "human",
+    });
+  }
+  for (const bm of bookmarks) bm.tags = byBookmark[bm.id] ?? [];
+  return bookmarks;
+}
+
 export const bookmarksRouter = router({
   createBookmark: protectedProcedure
     .input(zNewBookmarkRequestSchema)
@@ -99,10 +170,56 @@ export const bookmarksRouter = router({
         cursor: input.cursor ?? null,
         archived: input.archived ?? false,
         sortOrder: input.sortOrder ?? "desc",
+        favourited: input.favourited ?? null,
+        tagId: input.tagId ?? null,
+        q: input.q ?? null,
+        offset: input.offset ?? null,
       });
       return {
         bookmarks: result.bookmarks.map(toContractBookmark),
         nextCursor: result.nextCursor,
+        total: result.total,
+      };
+    }),
+
+  // 上游：packages/trpc/routers/bookmarks.ts 的 searchBookmarks。
+  // 客户端搜索框把原始查询串交给服务端解析（见 apps/mobile/lib/useBookmarkSearchState.ts）。
+  // 本实现覆盖解析器的常用子集，语义为 ILIKE 匹配（无 FTS 索引）。
+  searchBookmarks: protectedProcedure
+    .input(zSearchBookmarksRequestSchema)
+    .output(
+      z.object({
+        bookmarks: z.array(zBookmarkSchema),
+        nextCursor: zSearchBookmarksCursor.nullable(),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      if (input.searchMode !== "fts") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Semantic search is not enabled",
+        });
+      }
+      const parsed = parseSearchQuery(input.text);
+      const { clauses, params } = buildSearchConditions(parsed);
+      const limit = input.limit ?? 20;
+      const offset = input.cursor?.offset ?? 0;
+
+      const where = ["b.user_id = ?", ...clauses].join(" AND ");
+      const rows = await ctx.env.DB.prepare(
+        `SELECT b.* FROM bookmarks b WHERE ${where}
+         ORDER BY b.created_at DESC, b.id DESC LIMIT ? OFFSET ?`,
+      )
+        .bind(ctx.user.id, ...params, limit + 1, offset)
+        .all<BookmarkRow>();
+
+      const hasMore = rows.results.length > limit;
+      const page = hasMore ? rows.results.slice(0, limit) : rows.results;
+      const hydrated = await attachTags(ctx.env.DB, page.map(rowToServiceBookmark));
+
+      return {
+        bookmarks: hydrated.map(toContractBookmark),
+        nextCursor: hasMore ? { ver: 1 as const, offset: offset + limit } : null,
       };
     }),
 
@@ -454,5 +571,49 @@ export const bookmarksRouter = router({
       }
 
       return { attached: attachIds, detached: detachIds };
+    }),
+
+  // 单条重试失败标签：仅对 tagging_status='failure' 的书签生效，
+  // 重新入队到 enrichment 队列（执行时读取用户当前保存的模型配置）。
+  retryTagging: protectedProcedure
+    .input(z.object({ bookmarkId: z.string() }))
+    .output(z.object({ success: z.boolean() }))
+    .mutation(async ({ input, ctx }) => {
+      const row = await ctx.env.DB.prepare(
+        "SELECT id, canonical_url, tagging_status FROM bookmarks WHERE id = ? AND user_id = ?",
+      )
+        .bind(input.bookmarkId, ctx.user.id)
+        .first<{ id: string; canonical_url: string; tagging_status: string | null }>();
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "BOOKMARK_NOT_FOUND" });
+      // 可重试：失败 / 从未打过标签(NULL) / 卡在生成中（是否真卡死由 helper 的
+      // NOT EXISTS 守卫判断，仍有活跃 job 会返回 skipped，不会重复入队）
+      const retryable =
+        row.tagging_status === "failure" ||
+        row.tagging_status === "pending" ||
+        row.tagging_status === null;
+      if (!retryable) {
+        // 正常情况：已经生成好了。文案要说人话，别让用户以为功能坏了。
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            row.tagging_status === "success"
+              ? "这条书签的标签已经生成好了，无需重试"
+              : "这条书签的标签状态不支持重试",
+        });
+      }
+
+      const outcome = await requeueFailedTagging(ctx.env.DB, ctx.env.ENRICHMENT_QUEUE, ctx.user.id, {
+        id: row.id,
+        canonicalUrl: row.canonical_url,
+      });
+      if (!outcome.requeued && !outcome.skipped) {
+        // 入队失败（helper 已回滚 job 并保留 failure），让面板弹出真实错误
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "BOOKMARK_TAGGING_ENQUEUE_FAILED",
+        });
+      }
+      // skipped = 已有活跃 job，视为已在处理中
+      return { success: true };
     }),
 });

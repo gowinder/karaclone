@@ -2,6 +2,8 @@
 // attempt 4 置 dead 并抛错送 DLQ；普通 job 按用户 LLM 配置打标签/摘要。
 import { parseQueueMessage } from "./contracts.js";
 import { runOpenAiCompatible } from "../ai/openai-compatible.js";
+import { unwrapWorkersAiOutput } from "../ai/cloudflare-ai.js";
+import { isLlmProvider, resolveProviderRequest } from "../ai/providers.js";
 import { decryptSecret } from "../auth/secret-box.js";
 import { normalizeTags, parseTagResult } from "../ai/tag-schema.js";
 
@@ -24,10 +26,10 @@ async function enrichBookmark(
   if (!env) return;
   const bm = await db
     .prepare(
-      "SELECT b.user_id, b.title, l.description FROM bookmarks b LEFT JOIN bookmark_links l ON l.id = b.id WHERE b.id = ?",
+      "SELECT b.user_id, b.title, l.url, l.description FROM bookmarks b LEFT JOIN bookmark_links l ON l.id = b.id WHERE b.id = ?",
     )
     .bind(bookmarkId)
-    .first<{ user_id: string; title: string | null; description: string | null }>();
+    .first<{ user_id: string; title: string | null; url: string | null; description: string | null }>();
   if (!bm) return;
 
   const sel = await db
@@ -40,47 +42,51 @@ async function enrichBookmark(
     .bind(bm.user_id, sel.chat_provider)
     .first<{ base_url: string | null; api_key_enc: string | null }>();
 
-  const title = bm.title ?? "";
-  const description = bm.description ?? "";
+  // 标题/描述常为空（未抓取到元数据），必须带上 URL，否则模型只能返回空标签
+  const userContent = `URL: ${bm.url ?? ""}\nTitle: ${bm.title ?? ""}\nDescription: ${bm.description ?? ""}`;
   const systemPrompt =
-    'Return 1-8 concise Chinese bookmark tags and a description or null. Respond with pure JSON: {"tags": [...], "description": ...}';
+    "Generate 1-8 concise Chinese tags for a bookmark. Each tag must be a non-empty word or short phrase. " +
+    "Infer the topic from the URL domain/path when title and description are missing. " +
+    'description: a one-sentence Chinese summary, or null if unknown. Respond with pure JSON: {"tags": [...], "description": ...}';
 
   let raw: unknown;
   if (sel.chat_provider === "workers-ai") {
-    raw = await env.AI.run(sel.chat_model, {
+    // Workers AI 文本模型返回 { response } / { choices }，必须解包后再交给 parseTagResult
+    // （json_schema 模式下 response 是已解析对象，不解包会被判 schema_violation）。
+    raw = unwrapWorkersAiOutput(await env.AI.run(sel.chat_model, {
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: `${title}\n${description}` },
+        { role: "user", content: userContent },
       ],
       response_format: {
         type: "json_schema",
         json_schema: {
           type: "object",
           properties: {
-            tags: { type: "array", minItems: 1, maxItems: 8, items: { type: "string" } },
+            tags: { type: "array", minItems: 1, maxItems: 8, items: { type: "string", minLength: 1, maxLength: 40 } },
             description: { type: ["string", "null"], maxLength: 300 },
           },
           required: ["tags", "description"],
           additionalProperties: false,
         },
       },
-    });
+    }));
   } else {
     if (!cfg?.api_key_enc || !env.LLM_CONFIG_KEY) return;
+    if (!isLlmProvider(sel.chat_provider)) throw new Error(`unknown llm provider: ${sel.chat_provider}`);
     const apiKey = await decryptSecret(cfg.api_key_enc, env.LLM_CONFIG_KEY);
-    const baseUrl =
-      cfg.base_url ?? (sel.chat_provider === "openrouter" ? "https://openrouter.ai/api/v1" : "https://ollama.com");
-    // Ollama Cloud 的 OpenAI 兼容端点是 /v1/chat/completions（裸 /chat/completions 404）
-    const endpoint = sel.chat_provider === "ollama-cloud" ? "v1/chat/completions" : "chat/completions";
+    // 默认地址与端点统一从 PROVIDER_ENDPOINTS 取，禁止二元表达式兜底到 Ollama
+    const req = resolveProviderRequest(sel.chat_provider, cfg.base_url, bm.user_id);
     raw = await runOpenAiCompatible({
-      baseUrl,
+      baseUrl: req.baseUrl,
       apiKey,
       model: sel.chat_model,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: `${title}\n${description}` },
+        { role: "user", content: userContent },
       ],
-      endpoint,
+      endpoint: req.endpoint,
+      headers: req.headers,
       fetchImpl,
     });
   }
@@ -179,19 +185,34 @@ export async function handleEnrichmentBatch(
     }
 
     if (job.probe_mode !== 1) {
-      // 普通 job：按用户 LLM 配置打标签/摘要；失败不阻塞（标记 failure 继续 ack）
+      // 普通 job：按用户 LLM 配置打标签/摘要；失败不阻塞（标记 failure 继续 ack），
+      // 但必须把失败原因落库 + 打日志：否则重试失败后无人知道为什么
+      // （真实案例：模型被下线返回 410，界面只显示「标签失败」，排查全靠猜）。
       let taggingStatus = "success";
+      let errorCode: string | null = null;
+      let errorMessage: string | null = null;
       try {
         await enrichBookmark(db, env, job.bookmark_id, opts.fetchImpl);
-      } catch {
+      } catch (err) {
         taggingStatus = "failure";
+        errorMessage = (err instanceof Error ? err.message : String(err)).slice(0, 500);
+        errorCode = /LLM request failed: (\d+)/.exec(errorMessage)?.[1] ?? "TAGGING_FAILED";
+        console.error(
+          JSON.stringify({
+            event: "tagging_failed",
+            jobId,
+            bookmarkId: job.bookmark_id,
+            code: errorCode,
+            message: errorMessage,
+          }),
+        );
       }
       await db.batch([
         db
           .prepare(
-            "UPDATE enrichment_jobs SET status = 'success', lease_expires_at = NULL, updated_at = ? WHERE id = ?",
+            "UPDATE enrichment_jobs SET status = ?, lease_expires_at = NULL, last_error_code = ?, last_error_message = ?, updated_at = ? WHERE id = ?",
           )
-          .bind(now, jobId),
+          .bind(taggingStatus === "success" ? "success" : "failure", errorCode, errorMessage, now, jobId),
         db
           .prepare("UPDATE bookmarks SET tagging_status = ? WHERE id = ?")
           .bind(taggingStatus, job.bookmark_id),

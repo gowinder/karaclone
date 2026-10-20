@@ -29,4 +29,20 @@ describe("dashboard 面板", () => {
     expect(html).toContain('id="save-url"');
     expect(html).toContain('id="save-title"');
   });
+
+  it("面板包含重试失败标签入口与失败计数徽标", async () => {
+    const res = await handleDashboard(env as unknown as Env);
+    const html = await res.text();
+    expect(html).toContain('data-mtn="retry-tagging"');
+    expect(html).toContain('id="mtn-retry-count"');
+    expect(html).toContain("imports.retryFailedTagging");
+    expect(html).toContain("imports.failedTaggingCount");
+  });
+
+  it("页脚版本号来自 SERVER_VERSION，不是写死的", async () => {
+    const res = await handleDashboard(env as unknown as Env);
+    const html = await res.text();
+    expect(html).not.toContain("__SERVER_VERSION__");
+    expect(html).toContain(`v${(env as unknown as Env).SERVER_VERSION}`);
+  });
 });

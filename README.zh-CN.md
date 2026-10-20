@@ -28,6 +28,7 @@ KaraClone 是从零实现 Karakeep 服务端 API 的子集，部署在 Cloudflar
 - **Web 控制台** — Worker 直出零构建零依赖 HTML：书签列表、保存表单、收藏/归档切换、标签筛选、阅读视图、设置（LLM 提供商 + 模型选择）、账户信息。响应式：桌面左侧固定侧栏，移动端底部 Tab Bar。
 - **跨实例导入** — 从任意兼容的 Karakeep 实例迁移书签与标签（最多 500 条，按 URL 去重），后台队列执行，断点续传。
 - **导入修复** — 一键修复导入数据：为标题是 URL 的书签抓取真实标题；用 LLM 把英文标签翻译成中文（撞已有中文标签时自动合并）。
+- **重试失败标签** — 打标签失败的书签可一键重新入队：设置页有带失败数量的批量按钮，书签列表里每条失败书签也有单独重试；重跑时使用设置中当前保存的模型。
 - **API Key 认证** — 预生成 `ak2_...` 密钥，与官方客户端登录流程兼容。
 - **R2 资产存储** — OG 图片与上传资产存 R2 并提供访问。
 
@@ -144,7 +145,7 @@ curl https://karaclone-phase0.<你的子域>.workers.dev/api/version
 
 | 变量 | 默认值 | 含义 |
 |---|---|---|
-| `SERVER_VERSION` | `0.1.0` | 通过 `config.clientConfig` 上报给客户端；显示在控制台侧栏 |
+| `SERVER_VERSION` | `0.2.0` | 通过 `config.clientConfig` 上报给客户端；显示在控制台侧栏 |
 | `AI_MODEL` | `@cf/meta/llama-3.1-8b-instruct-fast` | 锁定的 Workers AI 打标签模型 — 不要修改 |
 | `PHASE0_CAPTURE` | `true` | 启用 phase-0 探针接口（受认证保护） |
 | `ALLOWED_EXTENSION_ORIGIN` | 两个 Chrome 扩展 ID | 浏览器扩展的 CORS 白名单 |
@@ -185,12 +186,13 @@ curl https://karaclone-phase0.<你的子域>.workers.dev/api/version
 
 - **导入** — `imports.startImportJob` 用凭据换取源实例 API Key（密码不落库），队列 consumer 分页拉取源实例并写入书签/标签，按 URL 去重（最多 500 条）。进度按任务持久化；失败可重试并从断点续传。
 - **修复** — `imports.fixImportedData` 创建 `kind=fix` 任务：(1) 为标题是 URL 的书签抓取真实标题；(2) 用用户 LLM 分批把英文标签翻译成中文，撞已有中文标签时合并。两个阶段均可断点续传，自动跳过已处理数据。
+- **重试失败标签** — `imports.retryFailedTagging` 创建 `kind=retry-tagging` 任务，把 `tagging_status='failure'` 的书签分批重新入队到 enrichment 队列（进度与其它任务一样持久化）；`bookmarks.retryTagging` 用于单条书签。consumer 在执行时才读取用户保存的模型配置，因此换模型后重试即用新模型，历史失败无需删库重来。`imports.failedTaggingCount` 为面板徽标提供失败数量。
 
 ## 开发
 
 ```bash
 npm run typecheck         # tsc --noEmit
-npm test                  # vitest run --max-workers=1 --no-isolate（349 个测试）
+npm test                  # vitest run --max-workers=1 --no-isolate（385 个测试）
 npm run d1:migrate:remote # 向远端 D1 应用迁移
 npm run deploy            # wrangler deploy --strict
 ```
@@ -211,7 +213,7 @@ src/
 └── ai/                   # Workers AI 打标签、OpenAI 兼容客户端
 migrations/               # 0011 个 D1 迁移（认证 → 导入任务 → 修复类型）
 scripts/phase0/           # preflight、部署、契约回放工具
-test/                     # vitest 测试套件（349 个测试）
+test/                     # vitest 测试套件（385 个测试）
 ```
 
 ## 已知限制

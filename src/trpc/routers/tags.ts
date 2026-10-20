@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, router } from "../base.js";
 
@@ -24,6 +25,9 @@ export const tagsRouter = router({
       z.object({
         tags: z.array(zGetTagResponseSchema),
         nextCursor: z.object({ page: z.number().int().min(0) }).nullish(),
+        // karaclone 扩展：仪表盘标签筛选器需要总数来显示「展开全部（共 N 个标签）」。
+        // 上游契约没有它，故 optional。
+        total: z.number().int().min(0).optional(),
       }),
     )
     .query(async ({ input, ctx }) => {
@@ -38,6 +42,12 @@ export const tagsRouter = router({
         where += ` AND t.id IN (${input.ids.map(() => "?").join(",")})`;
         params.push(...input.ids);
       }
+      // 总条数用同一组 where 参数算，必须在 push limit/offset 之前
+      const countRow = await ctx.env.DB.prepare(`SELECT COUNT(*) AS n FROM tags t ${where}`)
+        .bind(...params)
+        .first<{ n: number }>();
+      const total = countRow?.n ?? 0;
+
       const limit = input.limit ?? 50;
       const offset = (input.cursor?.page ?? 0) * limit;
       params.push(limit, offset);
@@ -67,6 +77,31 @@ export const tagsRouter = router({
       }));
 
       const nextCursor = tags.length === limit ? { page: (input.cursor?.page ?? 0) + 1 } : null;
-      return { tags, nextCursor };
+      return { tags, nextCursor, total };
+    }),
+  get: protectedProcedure
+    .input(z.object({ tagId: z.string() }))
+    .output(zGetTagResponseSchema)
+    .query(async ({ input, ctx }) => {
+      const row = await ctx.env.DB.prepare(
+        `SELECT t.id, t.name,
+          (SELECT COUNT(*) FROM bookmark_tags bt WHERE bt.tag_id = t.id) AS num_bookmarks,
+          (SELECT COUNT(*) FROM bookmark_tags bt WHERE bt.tag_id = t.id AND bt.attached_by = 'ai') AS num_ai,
+          (SELECT COUNT(*) FROM bookmark_tags bt WHERE bt.tag_id = t.id AND bt.attached_by = 'human') AS num_human
+        FROM tags t
+        WHERE t.id = ? AND t.user_id = ?`,
+      )
+        .bind(input.tagId, ctx.user.id)
+        .first<{ id: string; name: string; num_bookmarks: number; num_ai: number | null; num_human: number | null }>();
+
+      if (!row) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Tag not found" });
+      }
+      return {
+        id: row.id,
+        name: row.name,
+        numBookmarks: row.num_bookmarks,
+        numBookmarksByAttachedType: { ai: row.num_ai ?? 0, human: row.num_human ?? 0 },
+      };
     }),
 });

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { createExecutionContext, createMessageBatch, getQueueResult, SELF } from "cloudflare:test";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { parseQueueMessage, type QueueMessage } from "../src/queue/contracts";
 import { sha256Hex } from "../src/auth/api-key";
 import { runCronInvocation } from "../src/queue/cron";
@@ -219,7 +219,7 @@ describe("queue consumer 重试与状态迁移", () => {
     expect(tags.results.map((r) => r.name).sort()).toEqual(["ollama", "测试"]);
   });
 
-  it("普通 job + LLM 失败 → tagging failure 但 job success", async () => {
+  it("普通 job + LLM 失败 → tagging failure，job 置 failure 并记录原因", async () => {
     await seedAdmin();
     const jobId = "job_llm_fail";
     const bookmarkId = "bm_llm_fail";
@@ -237,9 +237,16 @@ describe("queue consumer 重试与状态迁移", () => {
       .run();
     const fakeFetch = async () => new Response("bad gateway", { status: 502 });
     const batch = createMessageBatch("karaclone-phase0-enrichment", [makeMessage(jobId, bookmarkId, 1)]);
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     await handleEnrichmentBatch(env.DB, batch, { ...env, LLM_CONFIG_KEY: "test-key" } as unknown as Env, { fetchImpl: fakeFetch });
-    const job = await env.DB.prepare("SELECT status FROM enrichment_jobs WHERE id = ?").bind(jobId).first<{ status: string }>();
-    expect(job?.status).toBe("success");
+    errSpy.mockRestore();
+    // job 终态反映真实结果：失败原因必须落库，否则重试失败后无从排查
+    const job = await env.DB.prepare("SELECT status, last_error_code, last_error_message FROM enrichment_jobs WHERE id = ?")
+      .bind(jobId)
+      .first<{ status: string; last_error_code: string | null; last_error_message: string | null }>();
+    expect(job?.status).toBe("failure");
+    expect(job?.last_error_code).toBe("502");
+    expect(job?.last_error_message).toContain("bad gateway");
     const bm = await env.DB.prepare("SELECT tagging_status FROM bookmarks WHERE id = ?").bind(bookmarkId).first<{ tagging_status: string }>();
     expect(bm?.tagging_status).toBe("failure");
   });

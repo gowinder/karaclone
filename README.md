@@ -28,6 +28,7 @@ Upstream baseline: Karakeep `5a2f009e2f6d266087f2f3f527e6e384cefd6de4` (2026-08-
 - **Web dashboard** — zero-build, zero-dependency HTML served directly by the Worker: bookmark list, save form, favourite/archive toggles, tag chips, reading view, settings (LLM providers + model selection), account info. Responsive: fixed sidebar on desktop, bottom tab bar on mobile.
 - **Import from another Karakeep instance** — migrate bookmarks and tags from any compatible instance (up to 500 bookmarks, URL-deduplicated), executed as a background queue job with resumable progress.
 - **Import repair** — one-click fix for imported data: fetch real titles for bookmarks whose title is a URL, and translate English tags to Chinese via LLM (merging into existing Chinese tags when they collide).
+- **Retry failed tagging** — re-queues every bookmark whose tagging failed (settings: one bulk action with a live failed count; bookmark list: a per-bookmark retry) and re-runs it with the LLM model currently saved in settings.
 - **API-key auth** — pre-generated `ak2_...` keys, compatible with the official clients' login flow.
 - **R2 asset storage** — OG images and uploaded assets served from R2.
 
@@ -144,7 +145,7 @@ curl https://karaclone-phase0.<your-subdomain>.workers.dev/api/version
 
 | Var | Default | Meaning |
 |---|---|---|
-| `SERVER_VERSION` | `0.1.0` | Reported to clients via `config.clientConfig`; shown in the dashboard sidebar |
+| `SERVER_VERSION` | `0.2.0` | Reported to clients via `config.clientConfig`; shown in the dashboard sidebar |
 | `AI_MODEL` | `@cf/meta/llama-3.1-8b-instruct-fast` | Locked Workers AI tagging model — do not change |
 | `PHASE0_CAPTURE` | `true` | Enables phase-0 probe endpoints (auth-protected) |
 | `ALLOWED_EXTENSION_ORIGIN` | two Chrome extension IDs | CORS allow-list for the browser extension |
@@ -185,12 +186,13 @@ Open `/` (or `/dashboard`) in a browser. Register an account, then log in. The d
 
 - **Import** — `imports.startImportJob` exchanges credentials for a source API key (password never stored), then a queue consumer paginates the source instance and inserts bookmarks/tags with URL deduplication (max 500 bookmarks). Progress is persisted per job; failed jobs can be retried and resume from the checkpoint.
 - **Fix** — `imports.fixImportedData` creates a `kind=fix` job that (1) fetches real titles for bookmarks whose title is a URL, and (2) translates English tags to Chinese in batches via the user's LLM, merging into existing Chinese tags. Both phases are resumable and skip already-processed rows.
+- **Retry failed tagging** — `imports.retryFailedTagging` creates a `kind=retry-tagging` job that re-queues every bookmark with `tagging_status='failure'` onto the enrichment queue in batches (progress tracked like any other job); `bookmarks.retryTagging` does the same for a single bookmark. The consumer reads the user's saved LLM selection at execution time, so bookmarks are re-tagged with the model currently configured — switching models in settings no longer requires a redeploy to re-run old failures. `imports.failedTaggingCount` feeds the dashboard badge.
 
 ## Development
 
 ```bash
 npm run typecheck        # tsc --noEmit
-npm test                 # vitest run --max-workers=1 --no-isolate (349 tests)
+npm test                 # vitest run --max-workers=1 --no-isolate (385 tests)
 npm run d1:migrate:remote # apply migrations to remote D1
 npm run deploy           # wrangler deploy --strict
 ```
@@ -211,7 +213,7 @@ src/
 └── ai/                   # Workers AI tagger, OpenAI-compatible client
 migrations/               # 0011 D1 migrations (auth → import jobs → fix kind)
 scripts/phase0/           # preflight, deploy, contract-replay tooling
-test/                     # vitest suites (349 tests)
+test/                     # vitest suites (385 tests)
 ```
 
 ## Limitations

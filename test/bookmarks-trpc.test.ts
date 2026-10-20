@@ -250,3 +250,89 @@ describe("getBookmarks 排序", () => {
     await env.DB.prepare("DELETE FROM bookmarks WHERE id IN (?, ?, ?)").bind(...ids).run();
   });
 });
+
+describe("getBookmarks 过滤 / 搜索 / 分页", () => {
+  const PREFIX = "https://example.com/fq/";
+  const ids: string[] = [];
+
+  async function seedRows() {
+    await seed();
+    ids.length = 0;
+    // 3 条不同标题，第 2 条收藏，第 3 条带标签
+    const specs: [string, string, number, number][] = [
+      [PREFIX + "a", "Sort 1 alpha", 0, 1000],
+      [PREFIX + "b", "Sort 2 beta", 1, 2000],
+      [PREFIX + "c", "Sort 3 gamma", 0, 3000],
+    ];
+    for (const [url, title, fav, createdAt] of specs) {
+      const id = crypto.randomUUID();
+      await env.DB.prepare(
+        "INSERT INTO bookmarks (id, user_id, canonical_url, title, archived, favourited, source, crawl_status, tagging_status, created_at) VALUES (?, ?, ?, ?, 0, ?, 'extension', 'success', 'success', ?)",
+      ).bind(id, USER_ID, url, title, fav, createdAt).run();
+      ids.push(id);
+    }
+    await env.DB.prepare("INSERT INTO tags (id, user_id, name, created_at) VALUES (?, ?, ?, ?)")
+      .bind("tag_fq_1", USER_ID, "fq-tag", Date.now())
+      .run();
+    await env.DB.prepare(
+      "INSERT INTO bookmark_tags (bookmark_id, tag_id, attached_by, attached_at) VALUES (?, ?, 'human', ?)",
+    ).bind(ids[2], "tag_fq_1", Date.now()).run();
+  }
+
+  async function cleanup() {
+    await env.DB.prepare("DELETE FROM bookmark_tags WHERE bookmark_id IN (?, ?, ?)").bind(...ids).run();
+    await env.DB.prepare("DELETE FROM bookmarks WHERE id IN (?, ?, ?)").bind(...ids).run();
+    await env.DB.prepare("DELETE FROM tags WHERE id = ?").bind("tag_fq_1").run();
+  }
+
+  it("total 等于匹配行数", async () => {
+    await seedRows();
+    const c = await caller();
+    const res = await c.bookmarks.getBookmarks({ archived: false, limit: 100, sortOrder: "desc" });
+    const mine = res.bookmarks.filter((b) => ids.includes(b.id));
+    expect(res.total).toBeGreaterThanOrEqual(3);
+    expect(mine).toHaveLength(3);
+    await cleanup();
+  });
+
+  it("q 只返回标题命中的书签", async () => {
+    await seedRows();
+    const c = await caller();
+    const res = await c.bookmarks.getBookmarks({ q: "Sort 1 alpha", archived: false, limit: 100 });
+    expect(res.bookmarks.map((b) => b.id)).toEqual([ids[0]]);
+    expect(res.total).toBe(1);
+    await cleanup();
+  });
+
+  it("favourited: true 只返回收藏", async () => {
+    await seedRows();
+    const c = await caller();
+    const res = await c.bookmarks.getBookmarks({ favourited: true, archived: false, limit: 100 });
+    expect(res.bookmarks.map((b) => b.id)).toEqual([ids[1]]);
+    expect(res.total).toBe(1);
+    await cleanup();
+  });
+
+  it("tagId 只返回带该标签的书签", async () => {
+    await seedRows();
+    const c = await caller();
+    const res = await c.bookmarks.getBookmarks({ tagId: "tag_fq_1", archived: false, limit: 100 });
+    expect(res.bookmarks.map((b) => b.id)).toEqual([ids[2]]);
+    expect(res.total).toBe(1);
+    await cleanup();
+  });
+
+  it("offset 生效：limit 1 offset 1 拿到第 2 条", async () => {
+    await seedRows();
+    const c = await caller();
+    const all = await c.bookmarks.getBookmarks({ q: "Sort", archived: false, limit: 100, sortOrder: "desc" });
+    expect(all.total).toBe(3);
+    const p1 = await c.bookmarks.getBookmarks({ q: "Sort", archived: false, limit: 1, offset: 0, sortOrder: "desc" });
+    const p2 = await c.bookmarks.getBookmarks({ q: "Sort", archived: false, limit: 1, offset: 1, sortOrder: "desc" });
+    expect(p1.bookmarks.map((b) => b.id)).toEqual([all.bookmarks[0]!.id]);
+    expect(p2.bookmarks.map((b) => b.id)).toEqual([all.bookmarks[1]!.id]);
+    expect(p1.total).toBe(3);
+    expect(p2.total).toBe(3);
+    await cleanup();
+  });
+});

@@ -51,6 +51,12 @@ export function parseTagResult(input: unknown): ParseTagResult {
   if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) {
     return { ok: false, error: "not_object" };
   }
+  // 小模型（如 Workers AI llama-3.3-70b JSON Mode）会用空串凑满 tags 数组，
+  // 丢弃空白项后再校验；全部为空仍判 schema_violation
+  const obj = candidate as { tags?: unknown };
+  if (Array.isArray(obj.tags)) {
+    candidate = { ...obj, tags: obj.tags.filter((t) => !(typeof t === "string" && t.trim() === "")) };
+  }
   const parsed = tagResultSchema.safeParse(candidate);
   if (!parsed.success) return { ok: false, error: "schema_violation" };
   return { ok: true, value: parsed.data };
