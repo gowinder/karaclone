@@ -59,3 +59,6 @@ Thumbs.db
 .phase0/
 artifacts/phase0/*
 !artifacts/phase0/.gitkeep
+
+# Claude Code local scratch (project skills are tracked)
+.claude/.cc-writes/
