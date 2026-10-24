@@ -261,6 +261,22 @@ export async function getBookmarks(
   };
 }
 
+/**
+ * 按同一条过滤条件取出全部匹配书签的 canonical URL（不分页），用于导出。
+ *
+ * 复用 buildListWhere，保证「导出」与「列表看到的内容」严格一致——列表同时应用
+ * tagId / q / favourited / archived，导出若只认 tagId，用户搜完再点标签导出就会
+ * 拿到比眼前多得多的 URL。顺序与列表默认一致：created_at 倒序。
+ */
+export async function listBookmarkUrls(db: D1Database, userId: string, opts: ListOptions): Promise<string[]> {
+  const { where, params } = buildListWhere(userId, opts);
+  const rows = await db
+    .prepare(`SELECT b.canonical_url AS url FROM bookmarks b WHERE ${where} ORDER BY b.created_at DESC, b.id DESC`)
+    .bind(...params)
+    .all<{ url: string }>();
+  return (rows.results ?? []).map((r) => r.url);
+}
+
 export async function updateReadingProgress(
   db: D1Database,
   input: {

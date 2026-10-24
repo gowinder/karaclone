@@ -610,7 +610,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
             <button class="sort-btn active" data-sort="desc">最新</button>
             <button class="sort-btn" data-sort="asc">最旧</button>
           </div>
-          <button class="btn secondary sm hidden" id="export-urls" title="导出当前标签下的全部 URL（一行一个）">导出 URL</button>
+          <button class="btn secondary sm hidden" id="export-urls" title="把当前列表里的 URL 导出为 txt（一行一个）">导出 URL</button>
         </div>
         <div class="tag-filter" id="tag-filter"></div>
         <div id="bookmark-list"></div>
@@ -1293,6 +1293,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     clearTimeout(searchDebounce);
     searchDebounce = setTimeout(function () {
       state.search = e.target.value.trim();
+      syncExportButton();
       loadBookmarks(false);
     }, 350);
   });
@@ -1412,25 +1413,30 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     });
   }
 
-  // 导出按钮只在选中标签时出现：导出的是「该标签下的全部 URL」，与当前分页无关。
+  // 导出按钮在列表被筛选时出现（标签、搜索词或收藏视图）。
+  // 导出范围 = 当前列表的全部结果（跨分页），过滤条件与列表完全一致。
   function syncExportButton() {
     var btn = document.getElementById("export-urls");
     if (!btn) return;
-    btn.classList.toggle("hidden", !state.tagId);
+    btn.classList.toggle("hidden", !(state.tagId || state.search || state.filter === "fav"));
   }
 
   // 一键导出：拿该标签下全部书签 URL，一行一个，浏览器直接下载 txt。
   // 文件内容与文件名都由服务端生成（含标签名与日期），前端只负责触发下载。
   document.getElementById("export-urls").addEventListener("click", async function () {
-    if (!state.tagId) return;
+    if (!state.tagId && !state.search && state.filter !== "fav") return;
     var btn = this;
     if (btn.disabled) return;
     var label = btn.textContent;
     btn.disabled = true;
     btn.textContent = "导出中…";
     try {
-      var data = await trpc("tags.exportBookmarks", { tagId: state.tagId, format: "txt" }, "GET");
-      if (!data.count) { toast("该标签下没有可导出的 URL"); return; }
+      var payload = { format: "txt" };
+      if (state.tagId) payload.tagId = state.tagId;
+      if (state.search) payload.q = state.search;
+      if (state.filter === "fav") payload.favourited = true;
+      var data = await trpc("tags.exportBookmarks", payload, "GET");
+      if (!data.count) { toast("当前列表没有可导出的 URL"); return; }
       var blob = new Blob([data.content], { type: data.contentType });
       var url = URL.createObjectURL(blob);
       var a = document.createElement("a");

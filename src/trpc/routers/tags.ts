@@ -1,14 +1,19 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { listBookmarkUrls } from "../../bookmarks/service.js";
 import { protectedProcedure, router } from "../base.js";
 
 // 导出格式。目前只做 txt（一行一个 URL），json/yaml 需要多维信息（url/tags/title）
 // 时再在此处扩展枚举与取值分支。
 const zExportRequestSchema = z.object({
-  tagId: z.string(),
+  tagId: z.string().optional(),
+  // 与列表视图的过滤条件对齐：用户先搜索/筛选、点标签后看到的是交集，
+  // 导出也必须是同一个交集，否则导出的条数会和列表对不上。
+  q: z.string().optional(),
+  favourited: z.boolean().optional(),
   format: z.enum(["txt"]).optional().default("txt"),
-  // 默认只导出未归档书签，与控制台「书签」默认视图保持一致。
-  includeArchived: z.boolean().optional().default(false),
+  // 与列表的筛选行为一致：false 只看未归档（默认），true 只看归档视图。
+  archived: z.boolean().optional().default(false),
 });
 
 const zExportResponseSchema = z.object({
@@ -32,12 +37,12 @@ export function tagNameToSlug(name: string): string {
   return slug.length > 0 ? slug : "tag";
 }
 
-/** 导出文件名：karaclone-<标签>-<YYYYMMDD>.txt */
-export function buildExportFileName(tagName: string, format: "txt", now: Date): string {
+/** 导出文件名：karaclone-<标签>-<YYYYMMDD>.txt（没有标签时用 bookmarks） */
+export function buildExportFileName(tagName: string | null, format: "txt", now: Date): string {
   const ymd = `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, "0")}${String(
     now.getUTCDate(),
   ).padStart(2, "0")}`;
-  return `karaclone-${tagNameToSlug(tagName)}-${ymd}.${format}`;
+  return `karaclone-${tagNameToSlug(tagName ?? "bookmarks")}-${ymd}.${format}`;
 }
 
 /** txt 导出内容：一行一个 URL，末尾带换行（符合 POSIX 文本文件约定）。 */
@@ -147,39 +152,43 @@ export const tagsRouter = router({
         numBookmarksByAttachedType: { ai: row.num_ai ?? 0, human: row.num_human ?? 0 },
       };
     }),
-  // 导出某个标签下的书签 URL：按 tag 筛选后一键导出，一行一个 URL（txt）。
-  // 标签必须属于当前用户——否则任何人猜到 tagId 就能把别人的书签 URL 拉走。
+  // 导出书签 URL：一行一个 URL（txt）。
+  //
+  // 过滤条件与列表视图共用 bookmarks/service 的 buildListWhere，因此「搜索 + 点标签」
+  // 后导出的是屏幕上那个交集，不会因为只认 tagId 而多导出。标签必须属于当前用户
+  // ——否则任何人猜到 tagId 就能把别人的书签 URL 拉走。
   exportBookmarks: protectedProcedure
     .input(zExportRequestSchema)
     .output(zExportResponseSchema)
     .query(async ({ input, ctx }) => {
       const userId = ctx.user.id;
 
-      const tag = await ctx.env.DB.prepare("SELECT id, name FROM tags WHERE id = ? AND user_id = ?")
-        .bind(input.tagId, userId)
-        .first<{ id: string; name: string }>();
-      if (!tag) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Tag not found" });
+      let tagName: string | null = null;
+      if (input.tagId) {
+        const tag = await ctx.env.DB.prepare("SELECT id, name FROM tags WHERE id = ? AND user_id = ?")
+          .bind(input.tagId, userId)
+          .first<{ id: string; name: string }>();
+        if (!tag) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Tag not found" });
+        }
+        tagName = tag.name;
       }
 
-      const archivedClause = input.includeArchived ? "" : " AND b.archived = 0";
-      const rows = await ctx.env.DB.prepare(
-        `SELECT b.canonical_url AS url
-         FROM bookmarks b
-         JOIN bookmark_tags bt ON bt.bookmark_id = b.id
-         WHERE bt.tag_id = ? AND b.user_id = ?${archivedClause}
-         ORDER BY b.created_at DESC, b.id DESC`,
-      )
-        .bind(tag.id, userId)
-        .all<{ url: string }>();
-
-      const urls = (rows.results ?? []).map((r) => r.url);
+      const urls = await listBookmarkUrls(ctx.env.DB, userId, {
+        limit: 0,
+        cursor: null,
+        archived: input.archived === true,
+        sortOrder: "desc",
+        tagId: input.tagId ?? null,
+        q: input.q ?? null,
+        favourited: input.favourited ?? null,
+      });
 
       return {
         urls,
         count: urls.length,
         content: buildTxtExport(urls),
-        fileName: buildExportFileName(tag.name, input.format, new Date()),
+        fileName: buildExportFileName(tagName, input.format, new Date()),
         contentType: "text/plain; charset=utf-8",
       };
     }),

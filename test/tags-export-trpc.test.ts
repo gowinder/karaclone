@@ -80,7 +80,7 @@ describe("tags.exportBookmarks", () => {
     expect(res.fileName).toMatch(/^karaclone-导出标签-\d{8}\.txt$/);
   });
 
-  it("默认不含归档书签，includeArchived 时可一并导出", async () => {
+  it("默认不含归档书签，archived: true 时只看归档视图", async () => {
     const c = await caller();
     const a = await bookmarkWithTag(c, "https://example.com/kept", "归档标签");
     const b = await bookmarkWithTag(c, "https://example.com/gone", "归档标签");
@@ -89,9 +89,8 @@ describe("tags.exportBookmarks", () => {
     const active = await c.tags.exportBookmarks({ tagId: a.tagId });
     expect(active.urls).toEqual(["https://example.com/kept"]);
 
-    const all = await c.tags.exportBookmarks({ tagId: a.tagId, includeArchived: true });
-    expect(all.count).toBe(2);
-    expect(all.urls.sort()).toEqual(["https://example.com/gone", "https://example.com/kept"]);
+    const archivedView = await c.tags.exportBookmarks({ tagId: a.tagId, archived: true });
+    expect(archivedView.urls).toEqual(["https://example.com/gone"]);
   });
 
   it("没有任何书签时返回空内容而不是报错", async () => {
@@ -104,6 +103,48 @@ describe("tags.exportBookmarks", () => {
     expect(res.count).toBe(0);
     expect(res.urls).toEqual([]);
     expect(res.content).toBe("");
+  });
+
+  it("与列表一致：搜索词 + 标签时导出交集，而非该标签全部", async () => {
+    const c = await caller();
+    const a = await bookmarkWithTag(c, "https://example.com/rust-async", "语言");
+    await bookmarkWithTag(c, "https://example.com/go-routines", "语言");
+
+    // 列表视图（buildQuery）同时传 tagId 和 q，看到的只有一条
+    const list = await c.bookmarks.getBookmarks({ limit: 20, offset: 0, archived: false, tagId: a.tagId, q: "rust" });
+    expect(list.bookmarks.map((b) => (b.content as { url: string }).url)).toEqual(["https://example.com/rust-async"]);
+
+    const res = await c.tags.exportBookmarks({ tagId: a.tagId, q: "rust" });
+    // 导出必须与列表看到的那一条严格一致，而不是该标签下的全部
+    expect(res.urls).toEqual(["https://example.com/rust-async"]);
+  });
+
+  it("与列表一致：收藏视图只导出已收藏的", async () => {
+    const c = await caller();
+    const a = await bookmarkWithTag(c, "https://example.com/fav-me", "收藏标签");
+    const b = await bookmarkWithTag(c, "https://example.com/plain", "收藏标签");
+    await c.bookmarks.updateBookmark({ bookmarkId: a.bookmarkId, favourited: true });
+
+    const list = await c.bookmarks.getBookmarks({
+      limit: 20,
+      offset: 0,
+      archived: false,
+      tagId: a.tagId,
+      favourited: true,
+    });
+    expect(list.total).toBe(1);
+
+    const res = await c.tags.exportBookmarks({ tagId: a.tagId, favourited: true });
+    expect(res.urls).toEqual(["https://example.com/fav-me"]);
+    expect(res.urls).not.toContain("https://example.com/plain");
+  });
+
+  it("不传 tagId 时导出整个当前列表，文件名回落为 bookmarks", async () => {
+    const c = await caller();
+    await bookmarkWithTag(c, "https://example.com/only-search", "随便");
+    const res = await c.tags.exportBookmarks({ q: "only-search" });
+    expect(res.urls).toEqual(["https://example.com/only-search"]);
+    expect(res.fileName).toMatch(/^karaclone-bookmarks-\d{8}\.txt$/);
   });
 
   it("标签不存在时 NOT_FOUND", async () => {
@@ -175,9 +216,13 @@ describe("导出格式工具函数", () => {
     expect(tagNameToSlug("")).toBe("tag");
   });
 
-  it("buildExportFileName 带标签名与 UTC 日期", () => {
-    const name = buildExportFileName("前端", "txt", new Date("2026-10-24T06:00:00Z"));
-    expect(name).toBe("karaclone-前端-20261024.txt");
+  it("buildExportFileName 带标签名与 UTC 日期，无标签时回落 bookmarks", () => {
+    expect(buildExportFileName("前端", "txt", new Date("2026-10-24T06:00:00Z"))).toBe(
+      "karaclone-前端-20261024.txt",
+    );
+    expect(buildExportFileName(null, "txt", new Date("2026-10-24T06:00:00Z"))).toBe(
+      "karaclone-bookmarks-20261024.txt",
+    );
   });
 
   it("buildTxtExport 一行为一个 URL，空列表为空串", () => {
