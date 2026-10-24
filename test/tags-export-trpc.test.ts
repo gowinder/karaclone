@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createContext } from "../src/trpc/context";
 import { appRouter } from "../src/trpc/router";
@@ -132,6 +133,36 @@ describe("tags.exportBookmarks", () => {
 
     const c = await caller();
     await expect(c.tags.exportBookmarks({ tagId: "tag_export_other" })).rejects.toThrow(/Tag not found/);
+  });
+});
+
+describe("tags.exportBookmarks 走 HTTP（控制台实际路径）", () => {
+  it("GET + superjson input 返回可下载的 txt 内容", async () => {
+    const c = await caller();
+    const a = await bookmarkWithTag(c, "https://example.com/http-one", "HTTP标签");
+    await bookmarkWithTag(c, "https://example.com/http-two", "HTTP标签");
+
+    // 与 dashboard.ts 的 trpc() 助手一致的请求形状：?batch=1&input={"0":{"json":{...}}}
+    const input = encodeURIComponent(JSON.stringify({ "0": { json: { tagId: a.tagId, format: "txt" } } }));
+    const res = await SELF.fetch(
+      `https://example.com/api/trpc/tags.exportBookmarks?batch=1&input=${input}`,
+      { method: "GET", headers: { Authorization: `Bearer ${VALID_KEY}` } },
+    );
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as [{ result: { data: { json: Record<string, unknown> } } }];
+    const data = body[0]!.result.data.json as {
+      urls: string[];
+      count: number;
+      content: string;
+      fileName: string;
+      contentType: string;
+    };
+    expect(data.count).toBe(2);
+    expect(data.urls).toHaveLength(2);
+    expect(data.content.split("\n").filter(Boolean)).toHaveLength(2);
+    expect(data.fileName).toMatch(/^karaclone-HTTP标签-\d{8}\.txt$/);
+    expect(data.contentType).toBe("text/plain; charset=utf-8");
   });
 });
 
