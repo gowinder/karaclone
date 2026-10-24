@@ -610,6 +610,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
             <button class="sort-btn active" data-sort="desc">最新</button>
             <button class="sort-btn" data-sort="asc">最旧</button>
           </div>
+          <button class="btn secondary sm hidden" id="export-urls" title="导出当前标签下的全部 URL（一行一个）">导出 URL</button>
         </div>
         <div class="tag-filter" id="tag-filter"></div>
         <div id="bookmark-list"></div>
@@ -1273,6 +1274,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     state.filter = btn.dataset.filter;
     state.tagId = null;
     document.querySelectorAll(".tag-chip").forEach(function (c) { c.classList.remove("active"); });
+    syncExportButton();
     loadBookmarks(false);
   });
 
@@ -1404,10 +1406,49 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           state.tagId = chip.dataset.tag;
         }
         state.offset = 0;
+        syncExportButton();
         loadBookmarks(false);
       });
     });
   }
+
+  // 导出按钮只在选中标签时出现：导出的是「该标签下的全部 URL」，与当前分页无关。
+  function syncExportButton() {
+    var btn = document.getElementById("export-urls");
+    if (!btn) return;
+    btn.classList.toggle("hidden", !state.tagId);
+  }
+
+  // 一键导出：拿该标签下全部书签 URL，一行一个，浏览器直接下载 txt。
+  // 文件内容与文件名都由服务端生成（含标签名与日期），前端只负责触发下载。
+  document.getElementById("export-urls").addEventListener("click", async function () {
+    if (!state.tagId) return;
+    var btn = this;
+    if (btn.disabled) return;
+    var label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "导出中…";
+    try {
+      var data = await trpc("tags.exportBookmarks", { tagId: state.tagId, format: "txt" }, "GET");
+      if (!data.count) { toast("该标签下没有可导出的 URL"); return; }
+      var blob = new Blob([data.content], { type: data.contentType });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = data.fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // 立刻 revoke 会让部分浏览器取消下载，挪到下一轮事件循环
+      setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+      toast("已导出 " + data.count + " 条 URL");
+    } catch (err) {
+      toast(err.message || "导出失败", true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  });
 
   // ---- 书签操作 ----
   document.getElementById("bookmark-list").addEventListener("click", async function (e) {
@@ -1593,6 +1634,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       });
       state.tagId = null;
       document.querySelectorAll(".tag-chip").forEach(function (c) { c.classList.remove("active"); });
+      syncExportButton();
       await loadBookmarks(false);
       await loadTagFilter();
       // 轮询等待标签生成（最多 60s，每 3s 一次）

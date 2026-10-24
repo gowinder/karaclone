@@ -39,6 +39,15 @@ describe("dashboard 面板", () => {
     expect(html).toContain("imports.failedTaggingCount");
   });
 
+  it("面板包含按标签导出 URL 的入口", async () => {
+    const res = await handleDashboard(env as unknown as Env);
+    const html = await res.text();
+    expect(html).toContain('id="export-urls"');
+    expect(html).toContain("tags.exportBookmarks");
+    // 默认隐藏：没选标签时不该出现导出按钮
+    expect(html).toContain('id="export-urls" title');
+  });
+
   it("页脚版本号来自 SERVER_VERSION，不是写死的", async () => {
     const res = await handleDashboard(env as unknown as Env);
     const html = await res.text();
