@@ -7,7 +7,7 @@
 
 ### 新增
 
-- **一键导出 URL**：列表被筛选后（标签、搜索词或收藏视图）出现「导出 URL」按钮，把当前列表的全部结果下载为 `.txt`，一行一个 URL。导出与列表共用筛选逻辑，看到的和下载的一致。
+- **一键导出 URL**：列表被筛选后（标签、搜索词、收藏或归档视图）出现「导出 URL」按钮，把当前列表的全部结果下载为 `.txt`，一行一个 URL。导出与列表共用筛选逻辑，看到的和下载的一致。
 - `tags.exportBookmarks` tRPC 端点，接受 `tagId` / `q` / `favourited` / `archived`，返回 `{ urls, count, content, fileName, contentType }`；文件名为 `karaclone-<标签>-<YYYYMMDD>.txt`（未选标签时为 `-bookmarks-`），标签名中的不安全字符折叠为 `-`。
 - 导出格式预留扩展位：`format` 为单值枚举，后续可加入 `json` / `yaml` 以携带 url、tags、title 等多维信息，不破坏现有调用方。
 
@@ -15,7 +15,7 @@
 
 - 导出端点校验标签归属，避免凭 tagId 读取他人书签 URL。
 - 导出范围由「该标签全部」改为「与列表一致的当前筛选结果」——原先搜索后再点标签导出，会拿到比屏幕上多出很多倍的 URL。
-- 导出去重方式改为按 `bookmarks` 主键关联，不再依赖 `DISTINCT` 掩盖重复行。
+- 去重改由 `buildListWhere` 的 `EXISTS` 子查询保证，不再用 `SELECT DISTINCT` 掩盖重复行。
 - README 中 `SERVER_VERSION` 长期停留在 `0.2.0`（实际已是 `0.2.2`），现已同步为 `0.2.3`。
 
 ### 测试
