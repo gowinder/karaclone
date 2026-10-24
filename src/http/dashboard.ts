@@ -1413,18 +1413,18 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     });
   }
 
-  // 导出按钮在列表被筛选时出现（标签、搜索词或收藏视图）。
+  // 导出按钮在列表被筛选时出现（标签、搜索词、收藏或归档视图）。
   // 导出范围 = 当前列表的全部结果（跨分页），过滤条件与列表完全一致。
   function syncExportButton() {
     var btn = document.getElementById("export-urls");
     if (!btn) return;
-    btn.classList.toggle("hidden", !(state.tagId || state.search || state.filter === "fav"));
+    btn.classList.toggle("hidden", !(state.tagId || state.search || state.filter !== "all"));
   }
 
   // 一键导出：拿该标签下全部书签 URL，一行一个，浏览器直接下载 txt。
   // 文件内容与文件名都由服务端生成（含标签名与日期），前端只负责触发下载。
   document.getElementById("export-urls").addEventListener("click", async function () {
-    if (!state.tagId && !state.search && state.filter !== "fav") return;
+    if (!state.tagId && !state.search && state.filter === "all") return;
     var btn = this;
     if (btn.disabled) return;
     var label = btn.textContent;
@@ -1435,6 +1435,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       if (state.tagId) payload.tagId = state.tagId;
       if (state.search) payload.q = state.search;
       if (state.filter === "fav") payload.favourited = true;
+      if (state.filter === "archived") payload.archived = true;
       var data = await trpc("tags.exportBookmarks", payload, "GET");
       if (!data.count) { toast("当前列表没有可导出的 URL"); return; }
       var blob = new Blob([data.content], { type: data.contentType });

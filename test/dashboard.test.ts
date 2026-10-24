@@ -39,13 +39,16 @@ describe("dashboard 面板", () => {
     expect(html).toContain("imports.failedTaggingCount");
   });
 
-  it("面板包含按标签导出 URL 的入口", async () => {
+  it("面板包含导出 URL 的入口，且覆盖全部筛选视图", async () => {
     const res = await handleDashboard(env as unknown as Env);
     const html = await res.text();
     expect(html).toContain('id="export-urls"');
     expect(html).toContain("tags.exportBookmarks");
-    // 默认隐藏：没选标签时不该出现导出按钮
+    // 默认隐藏：列表未筛选时不该出现导出按钮
     expect(html).toContain('id="export-urls" title');
+    // 三种筛选视图都要能导出，归档视图也要把 archived 传给端点
+    expect(html).toContain('payload.favourited = true');
+    expect(html).toContain('payload.archived = true');
   });
 
   it("页脚版本号来自 SERVER_VERSION，不是写死的", async () => {
