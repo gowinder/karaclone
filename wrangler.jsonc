@@ -25,7 +25,7 @@
     }
   ],
   "vars": {
-    "SERVER_VERSION": "0.2.2",
+    "SERVER_VERSION": "0.2.3",
     "AI_MODEL": "@cf/meta/llama-3.1-8b-instruct-fast",
     "PHASE0_CAPTURE": "true",
     "ALLOWED_EXTENSION_ORIGIN": "chrome-extension://kgcjekpmcjjogibpjebkhaanilehneje,chrome-extension://jbckmcljhgldkmfcpfafnfopikipadhc"
